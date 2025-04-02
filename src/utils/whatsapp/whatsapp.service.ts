@@ -798,6 +798,7 @@ export class WhatsappService {
     library_contact: string,
     library_url: string
   }) {
+    console.log(`🚀 ~ WhatsappService ~ props:`, props)
     try {
       const body = {
         messaging_product: 'whatsapp',
@@ -848,7 +849,9 @@ export class WhatsappService {
 
       return response.data
     } catch (error) {
-      console.error(error);
+      if (props.student_contact === "9370928324") {
+        console.error(error);
+      }
     }
   }
   async second_remindar_reservation(props: {
@@ -911,7 +914,9 @@ export class WhatsappService {
 
       return response.data
     } catch (error) {
-      console.error(error);
+      if (props.student_contact === "9370928324") {
+        console.error(error);
+      }
     }
   }
   async last_remindar_reservation(props: {
@@ -974,7 +979,9 @@ export class WhatsappService {
 
       return response.data
     } catch (error) {
-      console.error(error);
+      if (props.student_contact === "9370928324") {
+        console.error(error);
+      }
     }
   }
 }
