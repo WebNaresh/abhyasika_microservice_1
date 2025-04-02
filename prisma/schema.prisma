@@ -1,0 +1,596 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
+}
+
+enum Gender {
+  Male
+  Female
+  Other
+}
+
+model User {
+  id                       String             @id @default(uuid())
+  first_name               String
+  last_name                String
+  middle_name              String?            @default("")
+  phone_no                 String             @unique
+  email                    String             @unique
+  description              String?            @default("")
+  tag_line                 String?            @default("UPSC Aspirant")
+  adhar_no                 String?            @unique
+  gender                   Gender
+  role                     Role               @default(Student)
+  preparing_for            String?            @default("UPSC")
+  preparing_for_id         String?
+  preparingFor             UserPreparingFor?  @relation(fields: [preparing_for_id], references: [id])
+  address                  String?            @default("")
+  user_location_id         String?            @unique
+  location                 AddressLocation?   @relation(fields: [user_location_id], references: [id])
+  joiningDate              DateTime           @default(now())
+  user_image               String?            @default("")
+  degree                   String[]
+  created_at               DateTime           @default(now())
+  updated_at               DateTime           @updatedAt
+  library_created          Library?           @relation(name: "creator")
+  branch_id                String?
+  branch                   Branch?            @relation(fields: [branch_id], references: [id])
+  whatsapp_no              String?            @unique
+  emergency_contact        String             @default("")
+  birth_date               DateTime?
+  desk                     DeskNode?
+  library_id               String?
+  library_in               Library?           @relation(fields: [library_id], references: [id], name: "student_library", onDelete: SetNull)
+  library_sub_admin        Library?           @relation(name: "subAdmin", fields: [libraryId], references: [id])
+  libraryId                String?
+  plan_id                  String?
+  student_authority_person String?
+  student_authority        User?              @relation(fields: [student_authority_person], references: [id], name: "authority_person")
+  student_plan             UserCurrentPlan[]  @relation(name: "user_current_plan")
+  interested_library       Library[]          @relation(name: "interested_library")
+  interested_room          Room[]             @relation(name: "interested_room")
+  interested_branch        Branch[]           @relation(name: "interested_branch")
+  authorityFor             User[]             @relation("authority_person")
+  user_notification        Notification[]     @relation(name: "notification_user")
+  recipient_notitication   Notification[]     @relation(name: "reciepient_user")
+  interested_list          InterestedModel[]
+  NextMonthConfirm         NextMonthConfirm[]
+  StudentResponse          StudentResponse[]
+  AdminPageLog             AdminPageLog[]
+  firebase_token           String[]
+  password                 String?
+
+  @@index([id])
+  @@index([email])
+}
+
+enum Role {
+  SuperAdmin
+  Admin
+  SubAdmin
+  Student
+}
+
+model Library {
+  id                     String             @id @default(uuid())
+  name                   String             @unique
+  phone_no               String
+  library_location_id    String?            @unique
+  location               AddressLocation?   @relation(fields: [library_location_id], references: [id])
+  hero_image             String             @default("")
+  heading_logo           String?            @default("")
+  description            String             @default("")
+  google_map_location_id String             @default("")
+  creatorId              String?            @unique
+  creator                User?              @relation(fields: [creatorId], references: [id], onDelete: Cascade, name: "creator")
+  branch                 Branch[]
+  feature                Feature[]
+  testimonial            Testimonial[]
+  celebration_images     String[]           @default([])
+  library_images         LibraryImages[]
+  created_at             DateTime           @default(now())
+  updated_at             DateTime           @updatedAt
+  libraryAchiever        LibraryAchiever[]
+  students               User[]             @relation(name: "student_library")
+  library_url            String             @unique
+  library_plans          LibraryPlans[]
+  subAdmin               User[]             @relation(name: "subAdmin")
+  interested_students    User[]             @relation(name: "interested_library")
+  Room                   Room[]
+  DeskMatrix             DeskMatrix[]
+  DeskNode               DeskNode[]
+  UserCurrentPlan        UserCurrentPlan[]
+  Notification           Notification[]
+  razor_pay_details_id   String?            @unique
+  razor_pay_details      RazorPayDetails?   @relation(fields: [razor_pay_details_id], references: [id])
+  subscriptionPlanId     String?
+  interested_list        InterestedModel[]
+  library_theme          LibraryTheme?
+  NextMonthConfirm       NextMonthConfirm[]
+  StudentAlert           StudentAlert[]
+  billing                Billing[]
+  AppPlan                AppPlan?
+  AlertTemplate          AlertTemplate?
+
+  @@index([id])
+  @@index([library_url])
+}
+
+model InterestedModel {
+  id         String    @id @default(cuid())
+  library_id String
+  library    Library   @relation(fields: [library_id], references: [id])
+  room_id    String?
+  room       Room?     @relation(fields: [room_id], references: [id])
+  branch_id  String?
+  branch     Branch?   @relation(fields: [branch_id], references: [id])
+  user_id    String
+  user       User      @relation(fields: [user_id], references: [id])
+  desk_id    String?
+  DeskNode   DeskNode? @relation(fields: [desk_id], references: [id])
+  created_at DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([user_id, library_id])
+}
+
+model NextMonthConfirm {
+  id         String    @id @default(cuid())
+  library_id String
+  library    Library   @relation(fields: [library_id], references: [id])
+  room_id    String?
+  room       Room?     @relation(fields: [room_id], references: [id])
+  branch_id  String?
+  branch     Branch?   @relation(fields: [branch_id], references: [id])
+  user_id    String
+  user       User      @relation(fields: [user_id], references: [id])
+  desk_id    String?
+  DeskNode   DeskNode? @relation(fields: [desk_id], references: [id])
+  created_at DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([user_id, library_id])
+}
+
+model AddressLocation {
+  id          String    @id @default(cuid())
+  address     String
+  position    Cordinate @relation(fields: [cordinateId], references: [id])
+  library     Library?
+  cordinateId String    @unique
+  Branch      Branch?
+  User        User?
+}
+
+model Cordinate {
+  id             String           @id @default(cuid())
+  lat            Float
+  lng            Float
+  created_at     DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  LibraryAddress AddressLocation?
+}
+
+model LibraryImages {
+  id         String   @id @default(cuid())
+  image      String
+  library_id String
+  branch_id  String?
+  branch     Branch?  @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  room_id    String?  @unique
+  room       Room?    @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  library    Library  @relation(fields: [library_id], references: [id], onDelete: Cascade)
+}
+
+model Branch {
+  id                   String             @id @default(cuid())
+  branch_name          String
+  city                 String
+  state                String
+  pin_code             String
+  max_capacity         Int
+  fee                  Int
+  deposit              Int
+  description          String
+  libraryId            String
+  address              AddressLocation?   @relation(fields: [addressCoordinateId], references: [id])
+  addressCoordinateId  String?            @unique
+  created_at           DateTime           @default(now())
+  updated_at           DateTime           @updatedAt
+  room                 Room[]
+  library              Library            @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  branch_images        LibraryImages[]
+  student              User[]
+  interested_student   User[]             @relation(name: "interested_branch")
+  DeskMatrix           DeskMatrix[]
+  DeskNode             DeskNode[]
+  UserCurrentPlan      UserCurrentPlan[]
+  interested_list      InterestedModel[]
+  NextMonthConfirm     NextMonthConfirm[]
+  delegate_admin_phone String[]
+
+  @@index([id])
+}
+
+model Room {
+  id                         String             @id @default(cuid())
+  room_name                  String
+  capacity                   Int
+  branchId                   String
+  student_message_on_joining String             @default("Welcome to the Library")
+  charging_point             Boolean            @default(false)
+  seat_prefix                String?
+  prefix_enable              Boolean            @default(false)
+  ac                         Boolean            @default(false)
+  created_at                 DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
+  room_images                LibraryImages[]
+  desk_matrix_id             String?            @unique
+  whatsapp_group_link        String             @default("")
+  upi_id                     String             @default("")
+  updated_Desk               DeskMatrix?
+  branch                     Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  interested_student         User[]             @relation(name: "interested_room")
+  library                    Library            @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  libraryId                  String
+  DeskNode                   DeskNode[]
+  UserCurrentPlan            UserCurrentPlan[]
+  interested_list            InterestedModel[]
+  NextMonthConfirm           NextMonthConfirm[]
+
+  @@index([id])
+  @@index([libraryId])
+}
+
+model LibraryAchiever {
+  id          String   @id @default(cuid())
+  name        String
+  achievement String
+  image       String
+  achiever_id String?  @unique
+  created_at  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  library_id  String
+  library     Library  @relation(fields: [library_id], references: [id], onDelete: Cascade)
+
+  @@index([id])
+  @@index([library_id])
+}
+
+model Testimonial {
+  id         String   @id @default(cuid())
+  rating     Int      @default(5)
+  message    String
+  tag_line   String
+  created_at DateTime @default(now())
+  user_image String
+  user_name  String
+  updatedAt  DateTime @updatedAt
+  library_id String
+  library    Library  @relation(fields: [library_id], references: [id], onDelete: Cascade)
+
+  @@index([id])
+  @@index([library_id])
+}
+
+model Feature {
+  id          String   @id @default(cuid())
+  heading     String
+  description String
+  image       String
+  created_at  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  library_id  String
+  library     Library  @relation(fields: [library_id], references: [id], onDelete: Cascade)
+
+  @@index([id])
+  @@index([library_id])
+}
+
+model LibraryPlans {
+  id              String            @id @default(cuid())
+  plan_name       String
+  plan_price      Int
+  description     String
+  cycle_count     Int
+  features        String[]
+  library_id      String
+  library         Library           @relation(fields: [library_id], references: [id])
+  created_at      DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  UserCurrentPlan UserCurrentPlan[]
+
+  @@index([id])
+  @@index([library_id])
+}
+
+model UserCurrentPlan {
+  id                                     String         @id @default(cuid())
+  payment_status                         PAYMENTGATEWAY @default(OFFLINE)
+  userId                                 String
+  user                                   User           @relation(fields: [userId], references: [id], name: "user_current_plan")
+  planId                                 String
+  plan                                   LibraryPlans   @relation(fields: [planId], references: [id])
+  library_id                             String
+  library                                Library        @relation(fields: [library_id], references: [id])
+  room_id                                String?
+  room                                   Room?          @relation(fields: [room_id], references: [id], onDelete: SetNull)
+  desk_id                                String?
+  desk                                   DeskNode?      @relation(fields: [desk_id], references: [id], onDelete: SetNull)
+  branch_id                              String
+  branch                                 Branch         @relation(fields: [branch_id], references: [id])
+  status                                 Status         @default(Pending)
+  deposit                                DepositStatus  @default(Paid)
+  start_date                             DateTime       @default(now())
+  end_date                               DateTime       @default(now())
+  created_at                             DateTime       @default(now())
+  updatedAt                              DateTime       @updatedAt
+  start_month                            Int
+  end_month                              Int
+  start_year                             Int
+  end_year                               Int
+  due_payment_reminder_notification_send Int            @default(0)
+  membership_type                        MemberShipType @default(Reserved)
+  is_completed                           Boolean        @default(false)
+  paid_amount                            Int            @default(0)
+
+  @@index([id])
+  @@index([library_id])
+}
+
+model AppPlan {
+  id               String   @id @default(cuid())
+  plan_type        PlanType @default(Freemium)
+  plan_price       Int
+  plan_start_date  DateTime @default(now())
+  plan_expiry_date DateTime
+  library_id       String   @unique
+  library          Library  @relation(fields: [library_id], references: [id])
+}
+
+enum PlanType {
+  Freemium
+  Premium
+}
+
+enum MemberShipType {
+  Reserved
+  UnReserved
+}
+
+enum PAYMENTGATEWAY {
+  GOOGLE_PAY
+  PHONE_PAY
+  GATEWAY
+  OFFLINE
+  CASH
+}
+
+enum DepositStatus {
+  Paid
+  Pending
+}
+
+enum Status {
+  Paid
+  Pending
+  Cancelled
+}
+
+model OtpStore {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  otp        Int
+  created_at DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model UserPreparingFor {
+  id              String   @id @default(cuid())
+  preparing_for   String
+  created_at      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  clicked_counter Int      @default(0)
+  User            User[]
+}
+
+model DeskMatrix {
+  id          String     @id @default(cuid())
+  row         Int
+  col         Int
+  desk        DeskNode[]
+  seat_prefix String     @default("A")
+  total_desk  Int
+  room_id     String     @unique
+  room        Room       @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  branch_id   String
+  branch      Branch     @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  library_id  String
+  library     Library    @relation(fields: [library_id], references: [id], onDelete: Cascade)
+}
+
+model DeskNode {
+  id               String             @id @default(cuid())
+  col              Int
+  row              Int
+  seat_title       String?
+  direction        DeskDirection
+  desk_type        DeskType           @default(Filled)
+  desk_matrix      DeskMatrix         @relation(fields: [desk_matrix_id], references: [id], onDelete: Cascade)
+  desk_matrix_id   String
+  user_id          String?            @unique
+  user             User?              @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  room_id          String
+  room             Room               @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  branch_id        String
+  branch           Branch             @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  library_id       String
+  library          Library            @relation(fields: [library_id], references: [id], onDelete: Cascade)
+  UserCurrentPlan  UserCurrentPlan[]
+  InterestedModel  InterestedModel[]
+  NextMonthConfirm NextMonthConfirm[]
+}
+
+enum DeskDirection {
+  Up
+  Down
+  Left
+  Right
+}
+
+enum DeskType {
+  Entrance
+  Filled
+  Exit
+  EntryExit
+}
+
+model Notification {
+  id            String             @id @default(cuid())
+  title         String
+  description   String
+  creator_id    String
+  creator       User               @relation(fields: [creator_id], references: [id], onDelete: Cascade, name: "notification_user")
+  reciepient_id String
+  recipient     User               @relation(fields: [reciepient_id], references: [id], onDelete: Cascade, name: "reciepient_user")
+  library_id    String?
+  library       Library?           @relation(fields: [library_id], references: [id], onDelete: Cascade)
+  status        NotificationStatus @default(Pending)
+  type          NotificationType
+  redirectLink  String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([id])
+  @@index([creator_id])
+  @@index([reciepient_id])
+  @@index([library_id])
+}
+
+model RazorPayDetails {
+  id               String   @id @default(cuid())
+  razor_pay_id     String   @unique
+  razor_pay_secret String
+  created_at       DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  library_id       String?  @unique
+  library          Library?
+}
+
+enum NotificationType {
+  Interested
+  AddedToLibrary
+  General
+}
+
+enum NotificationStatus {
+  Pending
+  Seen
+}
+
+model LibraryTheme {
+  id            String       @id @default(cuid())
+  library_id    String       @unique
+  light_color   String       @default("#7C3AED")
+  dark_color    String       @default("#7C3AED")
+  default_theme DefaultTheme @default(Light)
+  created_at    DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  library       Library      @relation(fields: [library_id], references: [id], onDelete: Cascade)
+}
+
+enum DefaultTheme {
+  Light
+  Dark
+}
+
+model InterestedAdmin {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  first_name String
+  last_name  String
+  phone_no   String
+  message    String
+  created_at DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model StudentAlert {
+  id          String            @id @default(cuid())
+  name        String
+  description String
+  library_id  String
+  library     Library           @relation(fields: [library_id], references: [id])
+  response    StudentResponse[]
+  created_at  DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+enum ResponseEnum {
+  Interested
+  NotInterested
+  NotSeen
+  ContinuedToNextMonth
+}
+
+model StudentResponse {
+  id                         String       @id @default(cuid())
+  message                    String       @default("")
+  type                       String       @default("Confirmation")
+  student_id                 String
+  response                   ResponseEnum @default(NotSeen)
+  student                    User         @relation(fields: [student_id], references: [id])
+  alert_id                   String
+  alert                      StudentAlert @relation(fields: [alert_id], references: [id], onDelete: Cascade)
+  created_at                 DateTime     @default(now())
+  whatsapp_notification_send Int          @default(0)
+  updatedAt                  DateTime     @updatedAt
+}
+
+model Billing {
+  id           String      @id @default(cuid())
+  billing_type BillingType
+  is_paid      Boolean     @default(false)
+  library_id   String
+  library      Library     @relation(fields: [library_id], references: [id])
+  created_at   DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+enum BillingType {
+  WhatsappBilling
+  SmsBilling
+}
+
+model AdminPageLog {
+  id         String    @id @default(cuid())
+  admin_id   String
+  admin      User      @relation(fields: [admin_id], references: [id])
+  page_name  String
+  page_url   String
+  start_time DateTime  @default(now())
+  end_time   DateTime?
+  duration   Int? // Duration in seconds
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  @@index([admin_id])
+  @@index([page_name])
+}
+
+model AlertTemplate {
+  id                     String   @id @default(cuid())
+  library_id             String   @unique
+  library                Library  @relation(fields: [library_id], references: [id])
+  alert_on_25th_of_month Boolean  @default(false)
+  alert_on_27th_of_month Boolean  @default(false)
+  alert_on_28th_of_month Boolean  @default(false)
+  created_at             DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
