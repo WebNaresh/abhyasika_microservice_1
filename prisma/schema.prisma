@@ -243,6 +243,8 @@ model Room {
   UserCurrentPlan            UserCurrentPlan[]
   interested_list            InterestedModel[]
   NextMonthConfirm           NextMonthConfirm[]
+  LibraryPlans               LibraryPlans?      @relation(fields: [libraryPlansId], references: [id])
+  libraryPlansId             String?
 
   @@index([id])
   @@index([libraryId])
@@ -305,6 +307,7 @@ model LibraryPlans {
   created_at      DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   UserCurrentPlan UserCurrentPlan[]
+  rooms           Room[]
 
   @@index([id])
   @@index([library_id])
