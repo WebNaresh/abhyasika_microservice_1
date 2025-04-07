@@ -365,6 +365,7 @@ enum PlanType {
 enum MemberShipType {
   Reserved
   UnReserved
+  PartTime
 }
 
 enum PAYMENTGATEWAY {

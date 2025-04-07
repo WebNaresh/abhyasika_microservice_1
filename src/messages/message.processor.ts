@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
+import { AdmissionDto } from 'src/utils/whatsapp/dto/admission.dto';
 import { WhatsappService } from 'src/utils/whatsapp/whatsapp.service';
 
 @Processor('messageQueueFor25thOfMonth')
@@ -66,6 +67,27 @@ export class MessageProcessor28th extends WorkerHost {
         } catch (error) {
             console.error('Error in message processor:', error);
             // Don't throw the error, just log it and continue
+        }
+    }
+}
+
+@Processor('admissionMessageQueue')
+export class AdmissionMessageProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: AdmissionDto = job.data.content;
+            console.log(job.data);
+
+            await this.whatsapp.send_admission_notification(send_whatsapp).catch((error) => {
+                // Continue processing even if there's an error
+                return;
+            });
+
+        } catch (error) {
+            console.error('Error in message processor:', error);
         }
     }
 }

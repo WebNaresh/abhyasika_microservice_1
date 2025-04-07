@@ -3,6 +3,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import * as fs from 'fs';
 import { BillingService } from '../billing/billing.service';
+import { AdmissionDto } from './dto/admission.dto';
 import {
   ConfirmationTemplateDto,
   CreateWhatsappDto,
@@ -518,18 +519,7 @@ export class WhatsappService {
 
   }
 
-  async send_admission_notification(props: {
-    library_name: string;
-    student_name: string;
-    branch_name?: string;
-    room_name?: string;
-    desk_name?: string;
-    plan_name: string;
-    admission_date: string;
-    student_contact?: string;
-    library_contact_no: string;
-    library_url: string
-  }) {
+  async send_admission_notification(props: AdmissionDto) {
     if (props.student_contact === null || props.student_contact === undefined || props.student_contact === "") {
       console.error()
       return {}
