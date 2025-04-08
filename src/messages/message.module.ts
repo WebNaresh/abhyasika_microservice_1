@@ -1,12 +1,16 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module, OnModuleInit } from '@nestjs/common';
+import { ConnectionOptions } from 'bullmq';
 import { AdmissionMessageProcessor, MessageProcessor25th, MessageProcessor27th, MessageProcessor28th } from './message.processor';
 
-const connection = {
+const connection: ConnectionOptions = {
     host: process.env.REDIS_HOST,
     port: process.env.REDIS_PORT,
     password: process.env.REDIS_PASSWORD,
-    username: process.env.REDIS_USERNAME
+    username: process.env.REDIS_USERNAME,
+    tls: {
+        rejectUnauthorized: false
+    }
 }
 @Module({
     imports: [
