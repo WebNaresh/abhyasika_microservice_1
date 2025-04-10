@@ -556,7 +556,9 @@ export class WhatsappService {
                 { type: 'text', text: this.limitText(desk_name, 60) },
                 { type: 'text', text: this.limitText(props.plan_name || '', 60) },
                 { type: 'text', text: this.limitText(props.admission_date || '', 60) },
-                { type: 'text', text: this.limitText(`91${props.library_contact_no}` || '', 60) }
+                { type: 'text', text: this.limitText(props.admission_end_date || '', 60) },
+                { type: 'text', text: this.limitText(`91${props.library_contact_no}` || '', 60) },
+                { type: 'text', text: this.limitText(props.library_name || '', 60) },
               ]
             },
 

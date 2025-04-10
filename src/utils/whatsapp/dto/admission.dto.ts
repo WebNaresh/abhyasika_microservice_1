@@ -9,4 +9,5 @@ export class AdmissionDto {
     student_contact?: string;
     library_contact_no: string;
     library_url: string
+    admission_end_date: string;
 }
