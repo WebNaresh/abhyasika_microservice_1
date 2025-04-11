@@ -81,7 +81,7 @@ model Library {
   phone_no               String
   library_location_id    String?            @unique
   location               AddressLocation?   @relation(fields: [library_location_id], references: [id])
-  hero_image             String             @default("")
+  hero_image             String?            @default("")
   heading_logo           String?            @default("")
   description            String             @default("")
   google_map_location_id String             @default("")
@@ -90,6 +90,7 @@ model Library {
   branch                 Branch[]
   feature                Feature[]
   testimonial            Testimonial[]
+  deposit_amount         Int                @default(0)
   celebration_images     String[]           @default([])
   library_images         LibraryImages[]
   created_at             DateTime           @default(now())
@@ -115,6 +116,7 @@ model Library {
   billing                Billing[]
   AppPlan                AppPlan?
   AlertTemplate          AlertTemplate?
+  library_costs          LibraryCost[]
 
   @@index([id])
   @@index([library_url])
@@ -314,37 +316,46 @@ model LibraryPlans {
 }
 
 model UserCurrentPlan {
-  id                                     String         @id @default(cuid())
-  payment_status                         PAYMENTGATEWAY @default(OFFLINE)
+  id                                     String                         @id @default(cuid())
+  payment_status                         PAYMENTGATEWAY                 @default(OFFLINE)
   userId                                 String
-  user                                   User           @relation(fields: [userId], references: [id], name: "user_current_plan")
+  user                                   User                           @relation(fields: [userId], references: [id], name: "user_current_plan")
   planId                                 String
-  plan                                   LibraryPlans   @relation(fields: [planId], references: [id])
+  plan                                   LibraryPlans                   @relation(fields: [planId], references: [id])
   library_id                             String
-  library                                Library        @relation(fields: [library_id], references: [id])
+  library                                Library                        @relation(fields: [library_id], references: [id])
   room_id                                String?
-  room                                   Room?          @relation(fields: [room_id], references: [id], onDelete: SetNull)
+  room                                   Room?                          @relation(fields: [room_id], references: [id], onDelete: SetNull)
   desk_id                                String?
-  desk                                   DeskNode?      @relation(fields: [desk_id], references: [id], onDelete: SetNull)
+  desk                                   DeskNode?                      @relation(fields: [desk_id], references: [id], onDelete: SetNull)
   branch_id                              String
-  branch                                 Branch         @relation(fields: [branch_id], references: [id])
-  status                                 Status         @default(Pending)
-  deposit                                DepositStatus  @default(Paid)
-  start_date                             DateTime       @default(now())
-  end_date                               DateTime       @default(now())
-  created_at                             DateTime       @default(now())
-  updatedAt                              DateTime       @updatedAt
+  branch                                 Branch                         @relation(fields: [branch_id], references: [id])
+  status                                 Status                         @default(Pending)
+  deposit                                DepositStatus                  @default(Paid)
+  start_date                             DateTime                       @default(now())
+  end_date                               DateTime                       @default(now())
+  created_at                             DateTime                       @default(now())
+  updatedAt                              DateTime                       @updatedAt
   start_month                            Int
   end_month                              Int
   start_year                             Int
   end_year                               Int
-  due_payment_reminder_notification_send Int            @default(0)
-  membership_type                        MemberShipType @default(Reserved)
-  is_completed                           Boolean        @default(false)
-  paid_amount                            Int            @default(0)
+  due_payment_reminder_notification_send Int                            @default(0)
+  membership_type                        MemberShipType                 @default(Reserved)
+  is_completed                           Boolean                        @default(false)
+  paid_amount                            Int                            @default(0)
+  units                                  PlanUnits                      @default(Months)
+  user_library_costs                     UserCurrentPlanToLibraryCost[]
 
   @@index([id])
   @@index([library_id])
+}
+
+enum PlanUnits {
+  Days
+  Months
+  Weeks
+  Years
 }
 
 model AppPlan {
@@ -597,4 +608,31 @@ model AlertTemplate {
   alert_on_28th_of_month Boolean  @default(false)
   created_at             DateTime @default(now())
   updatedAt              DateTime @updatedAt
+}
+
+model LibraryCost {
+  id                           String                         @id @default(cuid())
+  name                         String // e.g., "Security Deposit", "Maintenance Fee", etc.
+  amount                       Int
+  description                  String
+  is_refundable                Boolean                        @default(false)
+  library_id                   String
+  library                      Library                        @relation(fields: [library_id], references: [id], onDelete: Cascade)
+  created_at                   DateTime                       @default(now())
+  updatedAt                    DateTime                       @updatedAt
+  UserCurrentPlanToLibraryCost UserCurrentPlanToLibraryCost[]
+
+  @@index([library_id])
+}
+
+model UserCurrentPlanToLibraryCost {
+  id                   String           @id @default(cuid())
+  user_id              String
+  library_cost_id      String
+  library_cost         LibraryCost      @relation(fields: [library_cost_id], references: [id])
+  status               DepositStatus
+  created_at           DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  userCurrentPlan      UserCurrentPlan? @relation(fields: [user_current_plan_id], references: [id])
+  user_current_plan_id String?
 }
