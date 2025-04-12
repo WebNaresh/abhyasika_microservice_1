@@ -390,6 +390,7 @@ enum PAYMENTGATEWAY {
 enum DepositStatus {
   Paid
   Pending
+  Continue
 }
 
 enum Status {
