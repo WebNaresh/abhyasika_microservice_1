@@ -115,6 +115,8 @@ model Library {
   AppPlan                AppPlan?
   AlertTemplate          AlertTemplate?
   library_costs          LibraryCost[]
+  UserPreparingFor       UserPreparingFor[]
+  ReceiptSettings        ReceiptSettings?
 
   @@index([id])
   @@index([library_url])
@@ -408,8 +410,21 @@ model OtpStore {
 model UserPreparingFor {
   id            String   @id @default(cuid())
   preparing_for String   @unique
+  library_id    String?
+  library       Library? @relation(fields: [library_id], references: [id])
   created_at    DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model ReceiptSettings {
+  id                    String   @id @default(cuid())
+  library_id            String   @unique
+  library               Library  @relation(fields: [library_id], references: [id])
+  signature             String?
+  is_signature_required Boolean  @default(false)
+  show_name_in_receipt  Boolean  @default(false)
+  created_at            DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 model DeskMatrix {
