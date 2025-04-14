@@ -3,6 +3,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import * as fs from 'fs';
 import { BillingService } from '../billing/billing.service';
+import { AdmissionAdminDto } from './dto/admission-admin.dto';
 import { AdmissionDto } from './dto/admission.dto';
 import {
   ConfirmationTemplateDto,
@@ -578,6 +579,10 @@ export class WhatsappService {
       );
       console.log(`🚀 ~ file: whatsapp.service.ts:576 ~ WhatsappService ~ response.data:`, response.data)
 
+      await this.billing_service.create_whatsapp_billing({
+        library_url: props.library_url,
+      })
+
       return response.data;
     } catch (error) {
       console.error(error)
@@ -974,6 +979,67 @@ export class WhatsappService {
       if (props.student_contact === "9370928324") {
         console.error(error);
       }
+    }
+  }
+  async send_admission_notification_admin(props: AdmissionAdminDto) {
+    if (props.library_contact === null || props.library_contact === undefined || props.library_contact === "") {
+      console.error()
+      return {}
+    }
+
+    const student_contact = props.library_contact || "9370928324";
+
+    try {
+      const body = {
+        messaging_product: 'whatsapp',
+        to: `91${student_contact}`,
+        type: 'template',
+        template: {
+          name: 'owner_admission_notification',
+          language: { code: 'en' },
+          components: [
+            {
+              type: 'header',
+              parameters: [
+                { type: 'text', text: this.limitText(props.library_name, 60) },
+              ],
+            },
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: this.limitText(props.student_name || '', 60) },
+                { type: 'text', text: this.limitText(props.branch_name || '', 60) },
+                { type: 'text', text: this.limitText(props.room_name || '', 60) },
+                { type: 'text', text: this.limitText(props.desk_name || '', 60) },
+                { type: 'text', text: this.limitText(props.plan_name || '', 60) },
+                { type: 'text', text: this.limitText(props.plan_start_date || '', 60) },
+                { type: 'text', text: this.limitText(props.plan_end_date || '', 60) },
+                { type: 'text', text: this.limitText(props.library_name || '', 60) },
+              ]
+            },
+
+          ]
+        },
+      };
+
+      const response = await axios.post(
+        'https://graph.facebook.com/v20.0/431174140080894/messages',
+        body,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      console.log(`🚀 ~ file: whatsapp.service.ts:576 ~ WhatsappService ~ response.data:`, response.data)
+      await this.billing_service.create_whatsapp_billing({
+        library_url: props.library_url,
+      })
+
+      return response.data;
+    } catch (error) {
+      console.error(error)
     }
   }
 }

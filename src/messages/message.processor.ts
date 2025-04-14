@@ -77,11 +77,30 @@ export class AdmissionMessageProcessor extends WorkerHost {
         super();
     }
     async process(job: Job) {
+        console.log(`🚀 ~ AdmissionMessageProcessor ~ job:`, job)
         try {
             const send_whatsapp: AdmissionDto = job.data.content;
             console.log(job.data);
 
             await this.whatsapp.send_admission_notification(send_whatsapp).catch((error) => {
+                console.log(`🚀 ~ AdmissionMessageProcessor ~ error:`, error)
+                // Continue processing even if there's an error
+                return;
+            });
+
+            await this.whatsapp.send_admission_notification_admin({
+                library_name: send_whatsapp.library_name,
+                student_name: send_whatsapp.student_name,
+                branch_name: send_whatsapp.branch_name,
+                room_name: send_whatsapp.room_name,
+                desk_name: send_whatsapp.desk_name,
+                plan_name: send_whatsapp.plan_name,
+                plan_start_date: send_whatsapp.admission_date,
+                plan_end_date: send_whatsapp.admission_end_date,
+                library_contact: send_whatsapp.library_contact_no,
+                library_url: send_whatsapp.library_url,
+            }).catch((error) => {
+                console.log(`🚀 ~ AdmissionMessageProcessor ~ error:`, error)
                 // Continue processing even if there's an error
                 return;
             });
