@@ -116,7 +116,7 @@ model Library {
   AlertTemplate          AlertTemplate?
   library_costs          LibraryCost[]
   UserPreparingFor       UserPreparingFor[]
-  ReceiptSettings        ReceiptSettings?
+  receipt_settings       ReceiptSettings?
 
   @@index([id])
   @@index([library_url])
