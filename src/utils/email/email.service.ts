@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Transporter, createTransport } from 'nodemailer';
-import { ConfirmationTemplateDto } from './dto/create-email.dto';
+import { ConfirmationTemplateEmailDto } from './dto/create-email.dto';
 
 interface Data {
   to: string;
@@ -1450,7 +1450,7 @@ export class EmailService {
     console.error('Error sending welcome email:', error);
   }
 
-  async send_seat_confirmation_email(props: ConfirmationTemplateDto) {
+  async send_seat_confirmation_email(props: ConfirmationTemplateEmailDto) {
     const {
       library_name,
       library_contact,

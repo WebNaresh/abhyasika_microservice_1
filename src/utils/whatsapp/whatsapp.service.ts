@@ -10,6 +10,7 @@ import {
   CreateWhatsappDto,
   WhatsappMessagePayload,
 } from './dto/create-whatsapp.dto';
+import { InterestedMessageDto } from './dto/interested_message.dto';
 
 @Injectable()
 export class WhatsappService {
@@ -455,14 +456,7 @@ export class WhatsappService {
 
   }
 
-  async send_interested_notification(props: {
-    library_contact: string;
-    student_contact: string;
-    student_name: string;
-    time_of_interested: Date
-    interested_desk: string
-    library_url: string
-  }) {
+  async send_interested_notification(props: InterestedMessageDto) {
     try {
       const body = {
         messaging_product: 'whatsapp',
@@ -507,6 +501,7 @@ export class WhatsappService {
           }
         }
       ).then(async (response) => {
+        console.log(`🚀 ~ WhatsappService ~ response:`, response.data)
 
         await this.billing_service.create_whatsapp_billing({
           library_url: props.library_url,

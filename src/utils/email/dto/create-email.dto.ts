@@ -2,7 +2,7 @@ import { IsString } from 'class-validator';
 
 
 
-export class ConfirmationTemplateDto {
+export class ConfirmationTemplateEmailDto {
   @IsString()
   student_name: string;
 
@@ -26,5 +26,4 @@ export class ConfirmationTemplateDto {
 
   @IsString()
   student_contact: string;
-
 }

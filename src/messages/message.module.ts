@@ -1,7 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { ConnectionOptions } from 'bullmq';
-import { AdmissionMessageProcessor, MessageProcessor25th, MessageProcessor27th, MessageProcessor28th } from './message.processor';
+import { AdmissionMessageProcessor, InterestedInAdmissionMessageProcessor, MessageProcessor25th, MessageProcessor27th, MessageProcessor28th } from './message.processor';
 
 const connection: ConnectionOptions = {
     host: process.env.REDIS_HOST,
@@ -30,8 +30,12 @@ const connection: ConnectionOptions = {
             name: 'admissionMessageQueue',
             connection
         }),
+        BullModule.registerQueue({
+            name: 'interestedInAdmissionMessageQueue',
+            connection
+        }),
     ],
-    providers: [MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, AdmissionMessageProcessor],
+    providers: [MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, AdmissionMessageProcessor, InterestedInAdmissionMessageProcessor,],
 })
 export class MessageModule implements OnModuleInit {
     onModuleInit() {
