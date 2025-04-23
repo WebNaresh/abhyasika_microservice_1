@@ -325,7 +325,7 @@ export class WhatsappService {
       to: `91${student_contact}`,
       type: 'template',
       template: {
-        name: 'library_seat_confirmation',
+        name: 'library_seat_confirmation_v2',
         language: { code: 'en' },
         components: [
           {

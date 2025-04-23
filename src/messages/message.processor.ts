@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { AdmissionDto } from 'src/utils/whatsapp/dto/admission.dto';
+import { ConfirmationTemplateDto } from 'src/utils/whatsapp/dto/create-whatsapp.dto';
 import { InterestedMessageDto } from 'src/utils/whatsapp/dto/interested_message.dto';
 import { WhatsappService } from 'src/utils/whatsapp/whatsapp.service';
 
@@ -14,10 +15,13 @@ export class MessageProcessor25th extends WorkerHost {
             const send_whatsapp = job.data.content;
             console.log(job.data);
 
-            await this.whatsapp.send_first_remindar_reservation(send_whatsapp).catch((error) => {
-                // Continue processing even if there's an error
-                return;
-            });
+            if (process.env.ENV !== 'development') {
+
+                await this.whatsapp.send_first_remindar_reservation(send_whatsapp).catch((error) => {
+                    // Continue processing even if there's an error
+                    return;
+                });
+            }
 
             console.log(`Message ${job.id} processed successfully`);
         } catch (error) {
@@ -37,10 +41,13 @@ export class MessageProcessor27th extends WorkerHost {
             const send_whatsapp = job.data.content;
             console.log(job.data);
 
-            await this.whatsapp.second_remindar_reservation(send_whatsapp).catch((error) => {
-                // Continue processing even if there's an error
-                return;
-            });
+            if (process.env.ENV !== 'development') {
+
+                await this.whatsapp.second_remindar_reservation(send_whatsapp).catch((error) => {
+                    // Continue processing even if there's an error
+                    return;
+                });
+            }
 
             console.log(`Message ${job.id} processed successfully`);
         } catch (error) {
@@ -59,10 +66,13 @@ export class MessageProcessor28th extends WorkerHost {
             const send_whatsapp = job.data.content;
             console.log(job.data);
 
-            await this.whatsapp.last_remindar_reservation(send_whatsapp).catch((error) => {
-                // Continue processing even if there's an error
-                return;
-            });
+            if (process.env.ENV !== 'development') {
+
+                await this.whatsapp.last_remindar_reservation(send_whatsapp).catch((error) => {
+                    // Continue processing even if there's an error
+                    return;
+                });
+            }
 
             console.log(`Message ${job.id} processed successfully`);
         } catch (error) {
@@ -125,10 +135,31 @@ export class InterestedInAdmissionMessageProcessor extends WorkerHost {
             const send_whatsapp: InterestedMessageDto = job.data.content;
             console.log(job.data);
 
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_interested_notification(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ InterestedInAdmissionMessageProcessor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('librarySeatConfirmationQueue')
+export class LibrarySeatConfirmationProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: ConfirmationTemplateDto = job.data.content;
+            console.log(job.data);
+
             // if (process.env.ENV !== 'development') {
-            await this.whatsapp.send_interested_notification(send_whatsapp).catch((error) => {
-                console.log(`🚀 ~ InterestedInAdmissionMessageProcessor ~ error:`, error)
-                return;
+            await this.whatsapp.confirmation_template(send_whatsapp).catch((error) => {
+                console.log(`🚀 ~ LibrarySeatConfirmationProcessor ~ error:`, error)
             });
             // }
         } catch (error) {
@@ -136,5 +167,4 @@ export class InterestedInAdmissionMessageProcessor extends WorkerHost {
         }
     }
 }
-
 
