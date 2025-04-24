@@ -225,12 +225,12 @@ export class FirstReminderPlanRenewalPendingV1Processor extends WorkerHost {
             const send_whatsapp: FirstReminderPlanRenewalPendingV1Dto = job.data.content;
             console.log(job.data);
 
-            if (process.env.ENV !== 'development') {
-                await this.whatsapp.send_first_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
-                    console.log(`🚀 ~ FirstReminderPlanRenewalPendingV1Processor ~ error:`, error)
-                    return;
-                });
-            }
+            // if (process.env.ENV !== 'development') {
+            await this.whatsapp.send_first_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
+                console.log(`🚀 ~ FirstReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                return;
+            });
+            // }
         } catch (error) {
             console.error('Error in message processor:', error);
         }
@@ -247,12 +247,12 @@ export class SecondReminderPlanRenewalPendingV1Processor extends WorkerHost {
             const send_whatsapp: FirstReminderPlanRenewalPendingV1Dto = job.data.content;
             console.log(job.data);
 
-            if (process.env.ENV !== 'development') {
-                await this.whatsapp.send_second_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
-                    console.log(`🚀 ~ SecondReminderPlanRenewalPendingV1Processor ~ error:`, error)
-                    return;
-                });
-            }
+            // if (process.env.ENV !== 'development') {
+            await this.whatsapp.send_second_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
+                console.log(`🚀 ~ SecondReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                return;
+            });
+            // }
         } catch (error) {
             console.error('Error in message processor:', error);
         }
@@ -269,12 +269,12 @@ export class ThirdReminderPlanRenewalPendingV1Processor extends WorkerHost {
             const send_whatsapp: FirstReminderPlanRenewalPendingV1Dto = job.data.content;
             console.log(job.data);
 
-            if (process.env.ENV !== 'development') {
-                await this.whatsapp.send_third_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
-                    console.log(`🚀 ~ ThirdReminderPlanRenewalPendingV1Processor ~ error:`, error)
-                    return;
-                });
-            }
+            // if (process.env.ENV !== 'development') {
+            await this.whatsapp.send_third_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
+                console.log(`🚀 ~ ThirdReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                return;
+            });
+            // }
         } catch (error) {
             console.error('Error in message processor:', error);
         }

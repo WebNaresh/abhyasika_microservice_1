@@ -1094,7 +1094,7 @@ export class WhatsappService implements OnModuleInit {
   async send_first_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
     try {
       const whatsappBody = new WhatsappBodyDto(
-        'first_reminder_plan_renewal_pending_v1',
+        'first_reminder__plan_renewal_pending_v1',
         props.receiver_mobile_number,
         props.library_url
       )
@@ -1136,7 +1136,7 @@ export class WhatsappService implements OnModuleInit {
   async send_third_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
     try {
       const whatsappBody = new WhatsappBodyDto(
-        'third_reminder__plan_renewal_pending',
+        'final_reminder__immediate_action_required',
         props.receiver_mobile_number,
         props.library_url
       )
