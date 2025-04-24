@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
 import * as fs from 'fs';
@@ -10,11 +10,21 @@ import {
   CreateWhatsappDto,
   WhatsappMessagePayload,
 } from './dto/create-whatsapp.dto';
+import { FirstReminderPlanRenewalPendingV1Dto } from './dto/first_reminder__plan_renewal_pending_v1.dto';
 import { InterestedMessageDto } from './dto/interested_message.dto';
+import { PaymentReceivedNotificationDto } from './dto/payment_received_notification.dto';
+import { PaymentRequestRejectedDto } from './dto/payment_request_rejected.dto';
+import { WhatsappBodyDto } from './dto/whatsapp_body.dto';
 
 @Injectable()
-export class WhatsappService {
+export class WhatsappService implements OnModuleInit {
   constructor(private readonly billing_service: BillingService) { }
+
+  // Initialize the WhatsappBodyDto with billing service
+  onModuleInit() {
+    WhatsappBodyDto.setBillingService(this.billing_service);
+  }
+
   // Simple function to log and throw errors for axios requests
   handleAxiosError(error: any) {
     console.error(
@@ -1037,4 +1047,111 @@ export class WhatsappService {
       console.error(error)
     }
   }
+
+  async send_payment_received_notification(props: PaymentReceivedNotificationDto) {
+    try {
+      // Create the body using the WhatsappBodyDto class with domain parameter
+      const whatsappBody = new WhatsappBodyDto(
+        'payment_received_notification',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.member_name },
+          { type: 'text', text: props.desk_title },
+          { type: 'text', text: props.room_title }
+        ]);
+
+      // Use the new sendMessage method which now has domain built-in
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
+
+  async send_payment_request_rejected(props: PaymentRequestRejectedDto) {
+    try {
+      const whatsappBody = new WhatsappBodyDto(
+        'payment_request_rejected',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.member_name },
+          { type: 'text', text: props.library_url },
+          { type: 'text', text: props.library_name },
+          { type: 'text', text: props.library_contact }
+        ]);
+
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
+
+  async send_first_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+    try {
+      const whatsappBody = new WhatsappBodyDto(
+        'first_reminder_plan_renewal_pending_v1',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.member_name },
+          { type: 'text', text: props.library_url },
+          { type: 'text', text: props.library_name },
+          { type: 'text', text: props.library_contact },
+        ]);
+
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
+
+  async send_second_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+    try {
+      const whatsappBody = new WhatsappBodyDto(
+        'second_reminder__plan_renewal_pending',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.member_name },
+          { type: 'text', text: props.library_url },
+          { type: 'text', text: props.library_name },
+          { type: 'text', text: props.library_contact }
+        ]);
+
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
+
+  async send_third_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+    try {
+      const whatsappBody = new WhatsappBodyDto(
+        'third_reminder__plan_renewal_pending',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.member_name },
+          { type: 'text', text: props.library_url },
+          { type: 'text', text: props.library_name },
+          { type: 'text', text: props.library_contact }
+        ]);
+
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
 }
+

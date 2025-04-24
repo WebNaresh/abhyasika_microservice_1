@@ -2,7 +2,10 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { AdmissionDto } from 'src/utils/whatsapp/dto/admission.dto';
 import { ConfirmationTemplateDto } from 'src/utils/whatsapp/dto/create-whatsapp.dto';
+import { FirstReminderPlanRenewalPendingV1Dto } from 'src/utils/whatsapp/dto/first_reminder__plan_renewal_pending_v1.dto';
 import { InterestedMessageDto } from 'src/utils/whatsapp/dto/interested_message.dto';
+import { PaymentReceivedNotificationDto } from 'src/utils/whatsapp/dto/payment_received_notification.dto';
+import { PaymentRequestRejectedDto } from 'src/utils/whatsapp/dto/payment_request_rejected.dto';
 import { WhatsappService } from 'src/utils/whatsapp/whatsapp.service';
 
 @Processor('messageQueueFor25thOfMonth')
@@ -168,3 +171,112 @@ export class LibrarySeatConfirmationProcessor extends WorkerHost {
     }
 }
 
+@Processor('paymentReceivedNotificationQueue')
+export class PaymentReceivedNotificationProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: PaymentReceivedNotificationDto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_payment_received_notification(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ PaymentReceivedNotificationProcessor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('paymentRequestRejectedQueue')
+export class PaymentRequestRejectedProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: PaymentRequestRejectedDto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_payment_request_rejected(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ PaymentRequestRejectedProcessor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('firstReminderPlanRenewalPendingV1Queue')
+export class FirstReminderPlanRenewalPendingV1Processor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: FirstReminderPlanRenewalPendingV1Dto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_first_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ FirstReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('secondReminderPlanRenewalPendingV1Queue')
+export class SecondReminderPlanRenewalPendingV1Processor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: FirstReminderPlanRenewalPendingV1Dto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_second_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ SecondReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('thirdReminderPlanRenewalPendingV1Queue')
+export class ThirdReminderPlanRenewalPendingV1Processor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: FirstReminderPlanRenewalPendingV1Dto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_third_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ ThirdReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
