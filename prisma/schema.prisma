@@ -14,53 +14,54 @@ enum Gender {
 }
 
 model User {
-  id                       String             @id @default(uuid())
+  id                       String              @id @default(uuid())
   first_name               String
   last_name                String
-  middle_name              String?            @default("")
-  phone_no                 String             @unique
-  email                    String             @unique
-  description              String?            @default("")
-  tag_line                 String?            @default("UPSC Aspirant")
-  adhar_no                 String?            @unique
+  middle_name              String?             @default("")
+  phone_no                 String              @unique
+  email                    String              @unique
+  description              String?             @default("")
+  tag_line                 String?             @default("UPSC Aspirant")
+  adhar_no                 String?             @unique
   gender                   Gender
-  role                     Role               @default(Student)
-  preparing_for            String?            @default("UPSC")
-  address                  String?            @default("")
-  user_location_id         String?            @unique
-  location                 AddressLocation?   @relation(fields: [user_location_id], references: [id])
-  joiningDate              DateTime           @default(now())
-  user_image               String?            @default("")
+  role                     Role                @default(Student)
+  preparing_for            String?             @default("UPSC")
+  address                  String?             @default("")
+  user_location_id         String?             @unique
+  location                 AddressLocation?    @relation(fields: [user_location_id], references: [id])
+  joiningDate              DateTime            @default(now())
+  user_image               String?             @default("")
   degree                   String[]
-  created_at               DateTime           @default(now())
-  updated_at               DateTime           @updatedAt
-  library_created          Library?           @relation(name: "creator")
+  created_at               DateTime            @default(now())
+  updated_at               DateTime            @updatedAt
+  library_created          Library?            @relation(name: "creator")
   branch_id                String?
-  branch                   Branch?            @relation(fields: [branch_id], references: [id])
-  whatsapp_no              String?            @unique
-  emergency_contact        String             @default("")
+  branch                   Branch?             @relation(fields: [branch_id], references: [id])
+  whatsapp_no              String?             @unique
+  emergency_contact        String              @default("")
   birth_date               DateTime?
   desk                     DeskNode?
   library_id               String?
-  library_in               Library?           @relation(fields: [library_id], references: [id], name: "student_library", onDelete: SetNull)
-  library_sub_admin        Library?           @relation(name: "subAdmin", fields: [libraryId], references: [id])
+  library_in               Library?            @relation(fields: [library_id], references: [id], name: "student_library", onDelete: SetNull)
+  library_sub_admin        Library?            @relation(name: "subAdmin", fields: [libraryId], references: [id])
   libraryId                String?
   plan_id                  String?
   student_authority_person String?
-  student_authority        User?              @relation(fields: [student_authority_person], references: [id], name: "authority_person")
-  student_plan             UserCurrentPlan[]  @relation(name: "user_current_plan")
-  interested_library       Library[]          @relation(name: "interested_library")
-  interested_room          Room[]             @relation(name: "interested_room")
-  interested_branch        Branch[]           @relation(name: "interested_branch")
-  authorityFor             User[]             @relation("authority_person")
-  user_notification        Notification[]     @relation(name: "notification_user")
-  recipient_notitication   Notification[]     @relation(name: "reciepient_user")
+  student_authority        User?               @relation(fields: [student_authority_person], references: [id], name: "authority_person")
+  student_plan             UserCurrentPlan[]   @relation(name: "user_current_plan")
+  interested_library       Library[]           @relation(name: "interested_library")
+  interested_room          Room[]              @relation(name: "interested_room")
+  interested_branch        Branch[]            @relation(name: "interested_branch")
+  authorityFor             User[]              @relation("authority_person")
+  user_notification        Notification[]      @relation(name: "notification_user")
+  recipient_notitication   Notification[]      @relation(name: "reciepient_user")
   interested_list          InterestedModel[]
   NextMonthConfirm         NextMonthConfirm[]
   StudentResponse          StudentResponse[]
   AdminPageLog             AdminPageLog[]
   firebase_token           String[]
   password                 String?
+  seat_change_requests     SeatChangeRequest[]
 
   @@index([id])
   @@index([email])
@@ -263,6 +264,7 @@ model Room {
   libraryPlansId             String?
   ReceiptPaymentQRCode       ReceiptPaymentQRCode? @relation(fields: [receiptPaymentQRCodeId], references: [id])
   receiptPaymentQRCodeId     String?
+  seat_change_requests       SeatChangeRequest[]
 
   @@index([id])
   @@index([libraryId])
@@ -477,25 +479,26 @@ model DeskMatrix {
 }
 
 model DeskNode {
-  id               String             @id @default(cuid())
-  col              Int
-  row              Int
-  seat_title       String?
-  direction        DeskDirection
-  desk_type        DeskType           @default(Filled)
-  desk_matrix      DeskMatrix         @relation(fields: [desk_matrix_id], references: [id], onDelete: Cascade)
-  desk_matrix_id   String
-  user_id          String?            @unique
-  user             User?              @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  room_id          String
-  room             Room               @relation(fields: [room_id], references: [id], onDelete: Cascade)
-  branch_id        String
-  branch           Branch             @relation(fields: [branch_id], references: [id], onDelete: Cascade)
-  library_id       String
-  library          Library            @relation(fields: [library_id], references: [id], onDelete: Cascade)
-  UserCurrentPlan  UserCurrentPlan[]
-  InterestedModel  InterestedModel[]
-  NextMonthConfirm NextMonthConfirm[]
+  id                   String              @id @default(cuid())
+  col                  Int
+  row                  Int
+  seat_title           String?
+  direction            DeskDirection
+  desk_type            DeskType            @default(Filled)
+  desk_matrix          DeskMatrix          @relation(fields: [desk_matrix_id], references: [id], onDelete: Cascade)
+  desk_matrix_id       String
+  user_id              String?             @unique
+  user                 User?               @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  room_id              String
+  room                 Room                @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  branch_id            String
+  branch               Branch              @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  library_id           String
+  library              Library             @relation(fields: [library_id], references: [id], onDelete: Cascade)
+  UserCurrentPlan      UserCurrentPlan[]
+  InterestedModel      InterestedModel[]
+  NextMonthConfirm     NextMonthConfirm[]
+  seat_change_requests SeatChangeRequest[]
 }
 
 enum DeskDirection {
@@ -691,8 +694,8 @@ enum PlanContinuationStatus {
 
 model PlanContinuationRequest {
   id                   String                 @id @default(cuid())
-  user_current_plan_id String                 @unique
   user_current_plan    UserCurrentPlan        @relation(fields: [user_current_plan_id], references: [id])
+  user_current_plan_id String                 @unique
   payment_screenshot   String
   status               PlanContinuationStatus @default(Pending)
   notes                String?
@@ -745,4 +748,29 @@ model LibraryAdmissionQuestionAnswer {
   interested_model_answers InterestedModelQuestionAnswer[]
 
   @@index([question_group_id])
+}
+
+enum SeatChangeRequestStatus {
+  Pending
+  Approved
+  Rejected
+}
+
+model SeatChangeRequest {
+  id          String                  @id @default(cuid())
+  user_id     String
+  new_room_id String
+  reason      String
+  user        User                    @relation(fields: [user_id], references: [id])
+  new_room    Room                    @relation(fields: [new_room_id], references: [id])
+  status      SeatChangeRequestStatus @default(Pending)
+  admin_notes String?
+  created_at  DateTime                @default(now())
+  updated_at  DateTime                @updatedAt
+  DeskNode    DeskNode[]
+  deskNodeIds String[]
+
+  @@index([user_id])
+  @@index([new_room_id])
+  @@index([status])
 }

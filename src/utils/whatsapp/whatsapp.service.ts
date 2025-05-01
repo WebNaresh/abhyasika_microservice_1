@@ -1097,7 +1097,9 @@ export class WhatsappService implements OnModuleInit {
         'first_reminder__plan_renewal_pending_v1',
         props.receiver_mobile_number,
         props.library_url
-      )
+      ).addHeaderComponent([
+        { type: 'text', text: props.library_name }
+      ])
         .addBodyComponent([
           { type: 'text', text: props.member_name },
           { type: 'text', text: props.library_url },
@@ -1118,7 +1120,9 @@ export class WhatsappService implements OnModuleInit {
         'second_reminder__plan_renewal_pending',
         props.receiver_mobile_number,
         props.library_url
-      )
+      ).addHeaderComponent([
+        { type: 'text', text: props.library_name }
+      ])
         .addBodyComponent([
           { type: 'text', text: props.member_name },
           { type: 'text', text: props.library_url },
@@ -1139,7 +1143,9 @@ export class WhatsappService implements OnModuleInit {
         'final_reminder__immediate_action_required',
         props.receiver_mobile_number,
         props.library_url
-      )
+      ).addHeaderComponent([
+        { type: 'text', text: props.library_name }
+      ])
         .addBodyComponent([
           { type: 'text', text: props.member_name },
           { type: 'text', text: props.library_url },
