@@ -7,9 +7,9 @@ import { AdmissionAdminDto } from './dto/admission-admin.dto';
 import { AdmissionDto } from './dto/admission.dto';
 import {
   ConfirmationTemplateDto,
-  CreateWhatsappDto,
-  WhatsappMessagePayload,
+  WhatsappMessagePayload
 } from './dto/create-whatsapp.dto';
+import { DuePaymentReminderDto } from './dto/due_payment_reminder.dto';
 import { FirstReminderPlanRenewalPendingV1Dto } from './dto/first_reminder__plan_renewal_pending_v1.dto';
 import { InterestedMessageDto } from './dto/interested_message.dto';
 import { PaymentReceivedNotificationDto } from './dto/payment_received_notification.dto';
@@ -164,75 +164,35 @@ export class WhatsappService implements OnModuleInit {
   limitText = (text: string, limit: number) => {
     return text.length > limit ? text.slice(0, limit) : text;
   };
-  async send_payment_reminder(props: CreateWhatsappDto) {
-    console.log(`🚀 ~ WhatsappService ~ send_payment_reminder props:`, props);
-    const {
-      library_name,
-      library_contact,
-      library_url,
-      student_email,
-      student_name,
-      student_contact,
-    } = props;
+  async send_payment_reminder(props: DuePaymentReminderDto) {
+
 
     try {
-      const response = await axios.post(
-        `https://graph.facebook.com/v20.0/431174140080894/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: `91${student_contact}`,
-          type: 'template',
-          template: {
-            name: 'abhyasika_payment_reminder',
-            language: { code: 'en' },
-            components: [
-              {
-                type: 'header',
-                parameters: [
-                  { type: 'text', text: this.limitText(library_name, 60) },
-                ],
-              },
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: this.limitText(student_name, 60) },
-                  { type: 'text', text: this.limitText(library_name, 60) },
-                  { type: 'text', text: this.limitText(student_email, 60) },
-                  { type: 'text', text: this.limitText(library_contact, 60) },
-                ],
-              },
-              {
-                type: 'button',
-                sub_type: 'url',
-                index: '0',
-                parameters: [
-                  {
-                    type: 'text',
-                    text: this.limitText(
-                      `library_redirect_method/${library_url}`,
-                      60,
-                    ),
-                  },
-                ],
-              },
-            ],
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      ).then(async (response) => {
+      const whatsapp_body = new WhatsappBodyDto(
+        "abhyasika_payment_reminder",
+        props.receiver_mobile_number,
+        props.library_url
+      ).addHeaderComponent([{
+        type: "text",
+        text: props.library_name
+      }]).addBodyComponent([{
+        type: "text",
+        text: props.student_name,
+      }, {
+        type: "text",
+        text: props.library_name
+      }, {
+        type: "text",
+        text: props.student_email
+      }, {
+        type: "text",
+        text: props.library_contact
+      }]).addButtonComponent("0", "url", [{
+        type: 'text',
+        text: `library_redirect_method/${props.library_url}`
+      }])
 
-        await this.billing_service.create_whatsapp_billing({
-          library_url: library_url,
-        })
-        return response.data;
-      });
-
-      return response.data;
+      return await whatsapp_body.sendMessage(this.billing_service);
     } catch (error) {
       this.handleAxiosError(error);
     }

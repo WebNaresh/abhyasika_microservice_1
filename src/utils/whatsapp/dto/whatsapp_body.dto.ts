@@ -15,6 +15,7 @@ export interface ButtonParameter {
     type: string;
     text?: string;
     payload?: string;
+    url?: string;
 }
 
 export class WhatsappBodyDto {
@@ -87,6 +88,10 @@ export class WhatsappBodyDto {
                 result.payload = this.limitText(param.payload, 60);
             }
 
+            if (param.url) {
+                result.text = this.limitText(param.url, 60);
+            }
+
             return result;
         });
 
@@ -121,7 +126,7 @@ export class WhatsappBodyDto {
                         'Content-Type': 'application/json'
                     }
                 }
-            );
+            )
 
             // Create billing record
             const billing = billingService || WhatsappBodyDto.billingService;

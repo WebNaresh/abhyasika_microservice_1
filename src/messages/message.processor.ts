@@ -2,6 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { AdmissionDto } from 'src/utils/whatsapp/dto/admission.dto';
 import { ConfirmationTemplateDto } from 'src/utils/whatsapp/dto/create-whatsapp.dto';
+import { DuePaymentReminderDto } from 'src/utils/whatsapp/dto/due_payment_reminder.dto';
 import { FirstReminderPlanRenewalPendingV1Dto } from 'src/utils/whatsapp/dto/first_reminder__plan_renewal_pending_v1.dto';
 import { InterestedMessageDto } from 'src/utils/whatsapp/dto/interested_message.dto';
 import { PaymentReceivedNotificationDto } from 'src/utils/whatsapp/dto/payment_received_notification.dto';
@@ -272,6 +273,28 @@ export class ThirdReminderPlanRenewalPendingV1Processor extends WorkerHost {
             // if (process.env.ENV !== 'development') {
             await this.whatsapp.send_third_reminder_plan_renewal_pending_v1(send_whatsapp).catch((error) => {
                 console.log(`🚀 ~ ThirdReminderPlanRenewalPendingV1Processor ~ error:`, error)
+                return;
+            });
+            // }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('duePaymentReminderNotificationQueue')
+export class DuePaymentReminderNotificationProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: DuePaymentReminderDto = job.data.content;
+            console.log(job.data, "In a due payment reminder");
+
+            // if (process.env.ENV !== 'development') {
+            await this.whatsapp.send_payment_reminder(send_whatsapp).catch((error) => {
+                console.log(`🚀 ~ DuePaymentReminderNotificationProcessor ~ error:`, error)
                 return;
             });
             // }
