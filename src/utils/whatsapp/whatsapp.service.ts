@@ -1,13 +1,11 @@
 import { HttpException, HttpStatus, Injectable, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
-import FormData from 'form-data';
-import * as fs from 'fs';
 import { BillingService } from '../billing/billing.service';
+import { AbhyasikaPendingPaymentDto } from './dto/abhyasika_pending_payment.dto';
 import { AdmissionAdminDto } from './dto/admission-admin.dto';
 import { AdmissionDto } from './dto/admission.dto';
 import {
-  ConfirmationTemplateDto,
-  WhatsappMessagePayload
+  ConfirmationTemplateDto
 } from './dto/create-whatsapp.dto';
 import { DuePaymentReminderDto } from './dto/due_payment_reminder.dto';
 import { FirstReminderPlanRenewalPendingV1Dto } from './dto/first_reminder__plan_renewal_pending_v1.dto';
@@ -35,130 +33,6 @@ export class WhatsappService implements OnModuleInit {
       'Failed to send WhatsApp message',
       HttpStatus.INTERNAL_SERVER_ERROR,
     );
-  }
-
-  async hello_world() {
-    try {
-      const response = await axios.post(
-        `https://graph.facebook.com/v20.0/437010516154310/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: '919371505828',
-          type: 'template',
-          template: {
-            name: 'hello_world',
-            language: {
-              code: 'en_US',
-            },
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      console.log(`🚀 ~ WhatsappService ~ response:`, response);
-      return response.data;
-    } catch (error) {
-      this.handleAxiosError(error);
-    }
-  }
-
-  async send_text_message(text: string) {
-    try {
-      const response = await axios.post(
-        `https://graph.facebook.com/v20.0/437010516154310/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: '919371505828',
-          type: 'text',
-          text: { body: text },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      console.log(`🚀 ~ WhatsappService ~ response:`, response);
-      return response.data;
-    } catch (error) {
-      this.handleAxiosError(error);
-    }
-  }
-
-  async send_image_link() {
-    try {
-      const response = await axios.post(
-        `https://graph.facebook.com/v20.0/437010516154310/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: '917219725697',
-          type: 'image',
-          image: {
-            link: 'https://neststudyroom.s3.ap-south-1.amazonaws.com/main_logo.png',
-            caption: 'This is a caption',
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      console.log(`🚀 ~ WhatsappService ~ response:`, response);
-      return response.data;
-    } catch (error) {
-      this.handleAxiosError(error);
-    }
-  }
-
-  async send_media_pdf() {
-    try {
-      const data = new FormData();
-      data.append('messaging_product', 'whatsapp');
-      data.append('file', fs.createReadStream(process.cwd() + '/logo.png'), {
-        contentType: 'image/png',
-      });
-      data.append('type', 'image/png');
-
-      const response = await axios.post(
-        `https://graph.facebook.com/v20.0/437010516154310/media`,
-        data,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-          },
-        },
-      );
-      console.log(`🚀 ~ WhatsappService ~ media upload response:`, response);
-
-      const response2 = await axios.post(
-        `https://graph.facebook.com/v20.0/437010516154310/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: '917219725697',
-          type: 'image',
-          image: {
-            id: response.data.id,
-            caption: 'This is a caption',
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      return response2.data;
-    } catch (error) {
-      this.handleAxiosError(error);
-    }
   }
 
   limitText = (text: string, limit: number) => {
@@ -199,7 +73,7 @@ export class WhatsappService implements OnModuleInit {
   }
 
   // Similar error handling for pending_payment
-  async pending_payment(props: WhatsappMessagePayload) {
+  async pending_payment(props: AbhyasikaPendingPaymentDto) {
     console.log(`🚀 ~ WhatsappService ~ pending_payment props:`, props);
     const {
       library_name,
@@ -207,69 +81,39 @@ export class WhatsappService implements OnModuleInit {
       library_url,
       student_email,
       student_name,
-      student_contact,
+      receiver_mobile_number,
       student_seat
     } = props;
 
     try {
-      const response = await axios.post(
-        `https://graph.facebook.com/v20.0/431174140080894/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: `91${student_contact}`,
-          type: 'template',
-          template: {
-            name: 'abhyasika_pending_payment',
-            language: { code: 'en' },
-            components: [
-              {
-                type: 'header',
-                parameters: [
-                  { type: 'text', text: this.limitText(library_name, 20) },
-                ],
-              },
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: this.limitText(student_name, 60) },
-                  { type: 'text', text: this.limitText(student_seat === "N/A" ? library_name : student_seat, 60) },
-                  { type: 'text', text: this.limitText(student_email, 60) },
-                  { type: 'text', text: this.limitText(library_name, 60) },
-                  { type: 'text', text: this.limitText(library_contact, 60) },
-                ],
-              },
-              {
-                type: 'button',
-                sub_type: 'url',
-                index: '0',
-                parameters: [
-                  {
-                    type: 'text',
-                    text: this.limitText(
-                      `library_redirect_method/${library_url}`,
-                      60,
-                    ),
-                  },
-                ],
-              },
-            ],
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      ).then(async (response) => {
+      const whatsapp_body = new WhatsappBodyDto(
+        "abhyasika_pending_payment",
+        receiver_mobile_number,
+        library_url
+      ).addHeaderComponent([{
+        type: "text",
+        text: library_name
+      }]).addBodyComponent([{
+        type: "text",
+        text: student_name
+      }, {
+        type: "text",
+        text: student_seat === "N/A" ? library_name : student_seat
+      }, {
+        type: "text",
+        text: student_email
+      }, {
+        type: "text",
+        text: library_name
+      }, {
+        type: "text",
+        text: library_contact
+      }]).addButtonComponent("0", "url", [{
+        type: "text",
+        text: `library_redirect_method/${library_url}`
+      }])
 
-        await this.billing_service.create_whatsapp_billing({
-          library_url: library_url,
-        })
-        return response.data;
-      });
-      console.log(`🚀 ~ file: whatsapp.service.ts:286 ~ WhatsappService ~ response:`, response.data)
-      return response.data;
+      return await whatsapp_body.sendMessage(this.billing_service);
     } catch (error) {
       this.handleAxiosError(error);
     }

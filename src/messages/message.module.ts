@@ -1,7 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { ConnectionOptions } from 'bullmq';
-import { AdmissionMessageProcessor, DuePaymentReminderNotificationProcessor, FirstReminderPlanRenewalPendingV1Processor, InterestedInAdmissionMessageProcessor, LibrarySeatConfirmationProcessor, MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, PaymentReceivedNotificationProcessor, PaymentRequestRejectedProcessor, SecondReminderPlanRenewalPendingV1Processor, ThirdReminderPlanRenewalPendingV1Processor } from './message.processor';
+import { AbhyasikaPendingPaymentProcessor, AdmissionMessageProcessor, DuePaymentReminderNotificationProcessor, FirstReminderPlanRenewalPendingV1Processor, InterestedInAdmissionMessageProcessor, LibrarySeatConfirmationProcessor, MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, PaymentReceivedNotificationProcessor, PaymentRequestRejectedProcessor, SecondReminderPlanRenewalPendingV1Processor, ThirdReminderPlanRenewalPendingV1Processor } from './message.processor';
 
 const connection: ConnectionOptions = {
     host: process.env.REDIS_HOST,
@@ -62,8 +62,12 @@ const connection: ConnectionOptions = {
             name: 'duePaymentReminderNotificationQueue',
             connection
         }),
+        BullModule.registerQueue({
+            name: 'abhyasikaPendingPaymentQueue',
+            connection
+        }),
     ],
-    providers: [MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, AdmissionMessageProcessor, InterestedInAdmissionMessageProcessor, LibrarySeatConfirmationProcessor, PaymentReceivedNotificationProcessor, PaymentRequestRejectedProcessor, FirstReminderPlanRenewalPendingV1Processor, SecondReminderPlanRenewalPendingV1Processor, ThirdReminderPlanRenewalPendingV1Processor, DuePaymentReminderNotificationProcessor],
+    providers: [MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, AdmissionMessageProcessor, InterestedInAdmissionMessageProcessor, LibrarySeatConfirmationProcessor, PaymentReceivedNotificationProcessor, PaymentRequestRejectedProcessor, FirstReminderPlanRenewalPendingV1Processor, SecondReminderPlanRenewalPendingV1Processor, ThirdReminderPlanRenewalPendingV1Processor, DuePaymentReminderNotificationProcessor, AbhyasikaPendingPaymentProcessor],
 })
 export class MessageModule implements OnModuleInit {
     onModuleInit() {

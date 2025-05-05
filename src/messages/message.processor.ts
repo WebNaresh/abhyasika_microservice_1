@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
+import { AbhyasikaPendingPaymentDto } from 'src/utils/whatsapp/dto/abhyasika_pending_payment.dto';
 import { AdmissionDto } from 'src/utils/whatsapp/dto/admission.dto';
 import { ConfirmationTemplateDto } from 'src/utils/whatsapp/dto/create-whatsapp.dto';
 import { DuePaymentReminderDto } from 'src/utils/whatsapp/dto/due_payment_reminder.dto';
@@ -292,12 +293,34 @@ export class DuePaymentReminderNotificationProcessor extends WorkerHost {
             const send_whatsapp: DuePaymentReminderDto = job.data.content;
             console.log(job.data, "In a due payment reminder");
 
-            // if (process.env.ENV !== 'development') {
-            await this.whatsapp.send_payment_reminder(send_whatsapp).catch((error) => {
-                console.log(`🚀 ~ DuePaymentReminderNotificationProcessor ~ error:`, error)
-                return;
-            });
-            // }
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_payment_reminder(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ DuePaymentReminderNotificationProcessor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('abhyasikaPendingPaymentQueue')
+export class AbhyasikaPendingPaymentProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: AbhyasikaPendingPaymentDto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.pending_payment(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ AbhyasikaPendingPaymentProcessor ~ error:`, error)
+                    return;
+                });
+            }
         } catch (error) {
             console.error('Error in message processor:', error);
         }
