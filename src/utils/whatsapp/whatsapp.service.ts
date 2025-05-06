@@ -111,7 +111,7 @@ export class WhatsappService implements OnModuleInit {
         text: library_contact
       }]).addButtonComponent("0", "url", [{
         type: "text",
-        text: `library_redirect_method/${library_url}`
+        text: `library_redirect_method/${library_url}/review`
       }])
 
       return await whatsapp_body.sendMessage(this.billing_service);
