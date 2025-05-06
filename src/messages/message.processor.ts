@@ -314,7 +314,7 @@ export class AbhyasikaPendingPaymentProcessor extends WorkerHost {
     async process(job: Job) {
         try {
             const send_whatsapp: AbhyasikaPendingPaymentDto = job.data.content;
-            console.log(job.data);
+            console.log("We are in AbhyasikaPendingPaymentProcessor", job.data);
 
             if (process.env.ENV !== 'development') {
                 await this.whatsapp.pending_payment(send_whatsapp).catch((error) => {
@@ -328,8 +328,8 @@ export class AbhyasikaPendingPaymentProcessor extends WorkerHost {
     }
 }
 
-@Processor('paymentReceiptQueue')
-export class PaymentReceiptProcessor extends WorkerHost {
+@Processor('abhyasikaPaymentReceiptQueue')
+export class AbhyasikaPaymentReceiptProcessor extends WorkerHost {
     constructor(private readonly whatsapp: WhatsappService) {
         super();
     }
