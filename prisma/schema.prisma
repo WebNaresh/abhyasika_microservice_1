@@ -62,6 +62,7 @@ model User {
   firebase_token           String[]
   password                 String?
   seat_change_requests     SeatChangeRequest[]
+  reviews                  Review[]
 
   @@index([id])
   @@index([email])
@@ -86,6 +87,7 @@ model Library {
   google_map_location_id   String                    @default("")
   creatorId                String?                   @unique
   creator                  User?                     @relation(fields: [creatorId], references: [id], onDelete: Cascade, name: "creator")
+  google_review_url        String?                   @default("")
   branch                   Branch[]
   feature                  Feature[]
   testimonial              Testimonial[]
@@ -118,6 +120,7 @@ model Library {
   UserPreparingFor         UserPreparingFor[]
   receipt_settings         ReceiptSettings?
   LibraryAdmissionQuestion LibraryAdmissionQuestion?
+  reviews                  Review[]
 
   @@index([id])
   @@index([library_url])
@@ -773,4 +776,21 @@ model SeatChangeRequest {
   @@index([user_id])
   @@index([new_room_id])
   @@index([status])
+}
+
+// store the review in the database
+model Review {
+  id         String   @id @default(cuid())
+  review     String
+  rating     Int      @default(0)
+  library_id String
+  library    Library  @relation(fields: [library_id], references: [id])
+  user_id    String?
+  user       User?    @relation(fields: [user_id], references: [id])
+  created_at DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([user_id, library_id])
+  @@index([user_id])
+  @@index([library_id])
 }
