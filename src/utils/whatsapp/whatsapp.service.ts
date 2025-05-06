@@ -11,6 +11,7 @@ import { DuePaymentReminderDto } from './dto/due_payment_reminder.dto';
 import { FirstReminderPlanRenewalPendingV1Dto } from './dto/first_reminder__plan_renewal_pending_v1.dto';
 import { InterestedMessageDto } from './dto/interested_message.dto';
 import { PaymentReceivedNotificationDto } from './dto/payment_received_notification.dto';
+import { PaymentReceiptDto } from './dto/payment_reciept.dto';
 import { PaymentRequestRejectedDto } from './dto/payment_request_rejected.dto';
 import { WhatsappBodyDto } from './dto/whatsapp_body.dto';
 
@@ -193,75 +194,39 @@ export class WhatsappService implements OnModuleInit {
 
   }
 
-  async send_payment_receipt(props: {
-    library_name: string;
-    student_name: string;
-    student_email: string;
-    seat_title: string;
-    plan_name: string;
-    plan_expiration_date: string;
-    library_contact_no: string;
-    student_contact: string
-    library_url: string
-  }) {
+  async send_payment_receipt(props: PaymentReceiptDto) {
     console.log(`🚀 ~ file: whatsapp.service.ts:404 ~ WhatsappService ~ props:`, props)
 
-    if (props.student_contact === null || props.student_contact === undefined || props.student_contact === "") {
-      console.error()
-      return {}
-    }
 
     try {
+      const body = new WhatsappBodyDto(
+        'study_room_payment_receipt',
+        props.receiver_mobile_number,
+        props.library_url
+      ).addHeaderComponent([{
+        type: 'text', text: props.library_name
+      }])
+        .addBodyComponent([{
+          type: 'text', text: props.student_name
+        }, {
+          type: 'text', text: props.student_email
+        }, {
+          type: 'text', text: props.seat_title
+        }, {
+          type: 'text', text: props.plan_name
+        }, {
+          type: 'text', text: props.plan_expiration_date
+        }, {
+          type: 'text', text: props.library_name
+        }, {
+          type: 'text', text: props.library_contact_no
+        }, {
+          type: 'text', text: props.library_name
+        }, {
+          type: 'text', text: props.library_url
+        }])
 
-      const body = {
-        messaging_product: 'whatsapp',
-        to: `91${props.student_contact}`,
-        type: 'template',
-        template: {
-          name: 'study_room_payment_receipt',
-          language: { code: 'en' },
-          components: [
-            {
-              type: 'header',
-              parameters: [
-                { type: 'text', text: this.limitText(props.library_name, 60) },
-              ],
-            },
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: this.limitText(props.student_name || '', 60) },
-                { type: 'text', text: this.limitText(props.student_email || '', 60) },
-                { type: 'text', text: this.limitText(props.seat_title || 'N/A', 60) },
-                { type: 'text', text: this.limitText(props.plan_name || '', 60) },
-                { type: 'text', text: this.limitText(props.plan_expiration_date || '', 60) },
-                { type: 'text', text: this.limitText(props.library_name || '', 60) },
-                { type: 'text', text: this.limitText(props.library_contact_no || '', 60) }
-              ]
-            },
-
-          ]
-        }
-      };
-
-      const response = await axios.post(
-        'https://graph.facebook.com/v20.0/431174140080894/messages',
-        body,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      ).then(async (response) => {
-
-        await this.billing_service.create_whatsapp_billing({
-          library_url: props.library_url,
-        })
-        return response.data;
-      });
-
-      return response.data;
+      return await body.sendMessage(this.billing_service);
 
     } catch (error) {
       console.log(error);

@@ -7,6 +7,7 @@ import { DuePaymentReminderDto } from 'src/utils/whatsapp/dto/due_payment_remind
 import { FirstReminderPlanRenewalPendingV1Dto } from 'src/utils/whatsapp/dto/first_reminder__plan_renewal_pending_v1.dto';
 import { InterestedMessageDto } from 'src/utils/whatsapp/dto/interested_message.dto';
 import { PaymentReceivedNotificationDto } from 'src/utils/whatsapp/dto/payment_received_notification.dto';
+import { PaymentReceiptDto } from 'src/utils/whatsapp/dto/payment_reciept.dto';
 import { PaymentRequestRejectedDto } from 'src/utils/whatsapp/dto/payment_request_rejected.dto';
 import { WhatsappService } from 'src/utils/whatsapp/whatsapp.service';
 
@@ -318,6 +319,28 @@ export class AbhyasikaPendingPaymentProcessor extends WorkerHost {
             if (process.env.ENV !== 'development') {
                 await this.whatsapp.pending_payment(send_whatsapp).catch((error) => {
                     console.log(`🚀 ~ AbhyasikaPendingPaymentProcessor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+
+@Processor('paymentReceiptQueue')
+export class PaymentReceiptProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: PaymentReceiptDto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_payment_receipt(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ PaymentReceiptProcessor ~ error:`, error)
                     return;
                 });
             }
