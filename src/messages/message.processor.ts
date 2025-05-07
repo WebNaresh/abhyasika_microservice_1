@@ -313,6 +313,7 @@ export class AbhyasikaPendingPaymentProcessor extends WorkerHost {
     }
     async process(job: Job) {
         try {
+            console.log(`🚀 ~ AbhyasikaPendingPaymentProcessor ~ process.env.ENV:`, process.env.ENV)
             const send_whatsapp: AbhyasikaPendingPaymentDto = job.data.content;
             console.log("We are in AbhyasikaPendingPaymentProcessor", job.data);
 
