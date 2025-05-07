@@ -87,7 +87,7 @@ model Library {
   google_map_location_id   String                    @default("")
   creatorId                String?                   @unique
   creator                  User?                     @relation(fields: [creatorId], references: [id], onDelete: Cascade, name: "creator")
-  google_review_url        String?                   @default("")
+  google_review_url        String                    @default("")
   branch                   Branch[]
   feature                  Feature[]
   testimonial              Testimonial[]
@@ -345,8 +345,8 @@ model UserCurrentPlan {
   plan                                   LibraryPlans                   @relation(fields: [planId], references: [id])
   library_id                             String
   library                                Library                        @relation(fields: [library_id], references: [id])
-  room_id                                String?
-  room                                   Room?                          @relation(fields: [room_id], references: [id], onDelete: SetNull)
+  room_id                                String
+  room                                   Room                           @relation(fields: [room_id], references: [id])
   desk_id                                String?
   desk                                   DeskNode?                      @relation(fields: [desk_id], references: [id], onDelete: SetNull)
   branch_id                              String
