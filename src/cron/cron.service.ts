@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import axios from 'axios';
 import { FirstReminderPlanRenewalPendingV1Dto } from 'src/utils/whatsapp/dto/first_reminder__plan_renewal_pending_v1.dto';
 import { MessageService } from '../messages/message.service';
 import { DatabaseService } from '../utils/database/database.service';
@@ -515,26 +514,4 @@ export class CronService {
         }
     }
 
-    @Cron('*/10 * * * * *', {
-        // @Cron('0 0 11 * * *', {
-        timeZone: 'Asia/Kolkata',
-        disabled: false,
-    })
-    async handleDailyExpiredPlansV2() {
-        this.logger.log('Running daily check for expired plans');
-        const response = await axios.get("https://google.com")
-        console.log(`🚀 ~ response:`, response)
-        await this.prisma.userCurrentPlan.update({
-            where: {
-                id: "cm7r3xz9j0002io1xepnjza2y"
-            },
-            data: {
-                due_payment_reminder_notification_send: {
-                    increment: 1
-                }
-            }
-        }).then(async (res) => {
-            console.log(`🚀 ~ res:`, res.due_payment_reminder_notification_send)
-        })
-    }
 }
