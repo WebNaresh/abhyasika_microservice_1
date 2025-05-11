@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { FirebasePushNotificationModule } from './firebase_push_notification/firebase_push_notification.module';
 
+import { CronModule } from './cron/cron.module';
 import { MessageModule } from './messages/message.module';
 import { CryptoClientModule } from './utils/crypto_client/crypto_client.module';
 import { DatabaseModule } from './utils/database/database.module';
@@ -45,7 +46,8 @@ import { WhatsappModule } from './utils/whatsapp/whatsapp.module';
     RazorPayClientModule,
     FirebaseAdminModule,
     FirebasePushNotificationModule,
-    MessageModule
+    MessageModule,
+    CronModule
   ],
   controllers: [AppController],
   providers: [AppService],
