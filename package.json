@@ -48,6 +48,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "crypto": "^1.0.1",
+    "crypto-browserify": "^3.12.1",
     "firebase-admin": "^13.2.0",
     "form-data": "^4.0.0",
     "ip": "^2.0.1",

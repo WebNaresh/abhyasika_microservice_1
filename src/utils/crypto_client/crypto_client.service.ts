@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import * as crypto from 'crypto';
+import * as crypto from 'crypto-browserify';
+
 
 import { UpdateCryptoClientDto } from './dto/update-crypto_client.dto';
 
