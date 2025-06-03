@@ -71,6 +71,10 @@ const connection: ConnectionOptions = {
             name: 'abhyasikaPaymentReceiptQueue',
             connection
         }),
+        BullModule.registerQueue({
+            name: 'paymentScreenshotUploadQueue',
+            connection
+        }),
     ],
     providers: [MessageProcessor25th, MessageProcessor27th, MessageProcessor28th, AdmissionMessageProcessor, InterestedInAdmissionMessageProcessor, LibrarySeatConfirmationProcessor, PaymentReceivedNotificationProcessor, PaymentRequestRejectedProcessor, FirstReminderPlanRenewalPendingV1Processor, SecondReminderPlanRenewalPendingV1Processor, ThirdReminderPlanRenewalPendingV1Processor, DuePaymentReminderNotificationProcessor, AbhyasikaPendingPaymentProcessor, AbhyasikaPaymentReceiptProcessor, MessageService],
     exports: [MessageService],

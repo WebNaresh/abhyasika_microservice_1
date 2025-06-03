@@ -13,6 +13,7 @@ import { InterestedMessageDto } from './dto/interested_message.dto';
 import { PaymentReceivedNotificationDto } from './dto/payment_received_notification.dto';
 import { PaymentReceiptDto } from './dto/payment_reciept.dto';
 import { PaymentRequestRejectedDto } from './dto/payment_request_rejected.dto';
+import { PaymentScreenshotUploadDto } from './dto/payment_screenshot_upload';
 import { WhatsappBodyDto } from './dto/whatsapp_body.dto';
 
 @Injectable()
@@ -928,5 +929,26 @@ export class WhatsappService implements OnModuleInit {
       this.handleAxiosError(error);
     }
   }
-}
 
+  async send_payment_screenshot_upload(props: PaymentScreenshotUploadDto) {
+    try {
+      const whatsappBody = new WhatsappBodyDto(
+        'payment_screenshot_upload',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.student_name },
+          { type: 'text', text: new Date(props.timestamp).toLocaleString() },
+          { type: 'text', text: props.student_name },
+          { type: 'text', text: props.student_phone_number },
+          { type: 'text', text: props.branch_name },
+        ]);
+
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
+}

@@ -9,6 +9,7 @@ import { InterestedMessageDto } from 'src/utils/whatsapp/dto/interested_message.
 import { PaymentReceivedNotificationDto } from 'src/utils/whatsapp/dto/payment_received_notification.dto';
 import { PaymentReceiptDto } from 'src/utils/whatsapp/dto/payment_reciept.dto';
 import { PaymentRequestRejectedDto } from 'src/utils/whatsapp/dto/payment_request_rejected.dto';
+import { PaymentScreenshotUploadDto } from 'src/utils/whatsapp/dto/payment_screenshot_upload';
 import { WhatsappService } from 'src/utils/whatsapp/whatsapp.service';
 
 @Processor('messageQueueFor25thOfMonth')
@@ -342,6 +343,27 @@ export class AbhyasikaPaymentReceiptProcessor extends WorkerHost {
             if (process.env.ENV !== 'development') {
                 await this.whatsapp.send_payment_receipt(send_whatsapp).catch((error) => {
                     console.log(`🚀 ~ PaymentReceiptProcessor ~ error:`, error)
+                    return;
+                });
+            }
+        } catch (error) {
+            console.error('Error in message processor:', error);
+        }
+    }
+}
+@Processor('paymentScreenshotUploadQueue')
+export class PaymentScreenshotUploadProcessor extends WorkerHost {
+    constructor(private readonly whatsapp: WhatsappService) {
+        super();
+    }
+    async process(job: Job) {
+        try {
+            const send_whatsapp: PaymentScreenshotUploadDto = job.data.content;
+            console.log(job.data);
+
+            if (process.env.ENV !== 'development') {
+                await this.whatsapp.send_payment_screenshot_upload(send_whatsapp).catch((error) => {
+                    console.log(`🚀 ~ PaymentScreenshotUploadProcessor ~ error:`, error)
                     return;
                 });
             }

@@ -10,6 +10,7 @@ import { InterestedMessageDto } from 'src/utils/whatsapp/dto/interested_message.
 import { PaymentReceivedNotificationDto } from 'src/utils/whatsapp/dto/payment_received_notification.dto';
 import { PaymentReceiptDto } from 'src/utils/whatsapp/dto/payment_reciept.dto';
 import { PaymentRequestRejectedDto } from 'src/utils/whatsapp/dto/payment_request_rejected.dto';
+import { PaymentScreenshotUploadDto } from 'src/utils/whatsapp/dto/payment_screenshot_upload';
 
 @Injectable()
 export class MessageService {
@@ -28,6 +29,7 @@ export class MessageService {
         @InjectQueue('duePaymentReminderNotificationQueue') private duePaymentReminderNotificationQueue: Queue,
         @InjectQueue('abhyasikaPendingPaymentQueue') private abhyasikaPendingPaymentQueue: Queue,
         @InjectQueue('abhyasikaPaymentReceiptQueue') private abhyasikaPaymentReceiptQueue: Queue,
+        @InjectQueue('paymentScreenshotUploadQueue') private paymentScreenshotUploadQueue: Queue,
     ) { }
 
     async firstReminder(messages: any[]) {
@@ -105,5 +107,10 @@ export class MessageService {
     async abhyasikaPaymentReceipt(message: PaymentReceiptDto) {
         console.log('Adding abhyasika payment receipt to the queue:', message);
         this.abhyasikaPaymentReceiptQueue.add('sendMessage', { id: new Date().getTime(), content: message });
+    }
+
+    async paymentScreenshotUpload(message: PaymentScreenshotUploadDto) {
+        console.log('Adding payment screenshot upload to the queue:', message);
+        this.paymentScreenshotUploadQueue.add('sendMessage', { id: new Date().getTime(), content: message });
     }
 }
