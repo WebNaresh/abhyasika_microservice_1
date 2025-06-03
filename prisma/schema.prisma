@@ -241,13 +241,9 @@ model Branch {
 model Room {
   id                         String                @id @default(cuid())
   room_name                  String
-  capacity                   Int
   branchId                   String
   student_message_on_joining String                @default("Welcome to the Library")
-  charging_point             Boolean               @default(false)
   seat_prefix                String?
-  prefix_enable              Boolean               @default(false)
-  ac                         Boolean               @default(false)
   created_at                 DateTime              @default(now())
   updatedAt                  DateTime              @updatedAt
   room_images                LibraryImages[]
