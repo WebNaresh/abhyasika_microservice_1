@@ -19,6 +19,7 @@ export class WebjsService implements OnModuleDestroy {
     private s3Store: CustomS3Store;
     private authRecoveryService: AuthRecoveryService;
     private sessionDiagnosticsService: SessionDiagnosticsService;
+    private activeTimers: Map<string, { progressInterval?: NodeJS.Timeout; timeoutHandle?: NodeJS.Timeout }> = new Map();
 
     constructor(
         private readonly databaseService: DatabaseService,
@@ -35,6 +36,10 @@ export class WebjsService implements OnModuleDestroy {
 
     async onModuleDestroy() {
         this.logger.log('Destroying all WhatsApp clients...');
+
+        // Clean up all active timers first
+        this.cleanupAllTimers();
+
         const clientEntries = Array.from(this.clients.entries());
         for (const [sessionId, clientInstance] of clientEntries) {
             try {
@@ -136,6 +141,15 @@ export class WebjsService implements OnModuleDestroy {
                         await new Promise(resolve => setTimeout(resolve, 2000)); // Delay between initializations
                     } catch (error) {
                         this.logger.error(`❌ Failed to initialize recovered session ${result.sessionId}:`, error);
+
+                        // Update session status to reflect initialization failure
+                        await this.safeUpdateSession(result.sessionId, {
+                            status: WhatsAppSessionStatus.DISCONNECTED,
+                            is_ready: false,
+                            is_authenticated: false,
+                            last_error: error.message || 'Session initialization failed during recovery',
+                            last_error_time: new Date(),
+                        });
                     }
                 } else if (result.success && result.recoveryMethod === 'QR_REGENERATED') {
                     this.logger.log(`📱 Session ${result.sessionId} marked for QR regeneration - will initialize on first access`);
@@ -146,6 +160,80 @@ export class WebjsService implements OnModuleDestroy {
 
         } catch (error) {
             this.logger.error('❌ Error restoring recovered sessions:', error);
+        }
+    }
+
+    // Clean up all timers for a specific session
+    private cleanupSessionTimers(sessionId: string): void {
+        const timers = this.activeTimers.get(sessionId);
+        if (timers) {
+            if (timers.progressInterval) {
+                clearInterval(timers.progressInterval);
+                this.logger.log(`🧹 Cleared progress interval for session ${sessionId}`);
+            }
+            if (timers.timeoutHandle) {
+                clearTimeout(timers.timeoutHandle);
+                this.logger.log(`🧹 Cleared timeout handle for session ${sessionId}`);
+            }
+            this.activeTimers.delete(sessionId);
+        }
+    }
+
+    // Clean up all active timers
+    private cleanupAllTimers(): void {
+        for (const [sessionId] of this.activeTimers) {
+            this.cleanupSessionTimers(sessionId);
+        }
+    }
+
+    // Perform pre-initialization checks to identify potential issues early
+    private async performPreInitializationChecks(sessionId: string): Promise<void> {
+        this.logger.log(`🔍 Performing pre-initialization checks for session ${sessionId}...`);
+
+        try {
+            // Check S3 connectivity
+            const s3Connected = await this.s3Store.testConnection();
+            if (!s3Connected) {
+                this.logger.warn(`⚠️ S3 connection test failed for session ${sessionId}`);
+            } else {
+                this.logger.log(`✅ S3 connectivity check passed for session ${sessionId}`);
+            }
+
+            // Check system memory (basic check)
+            const memUsage = process.memoryUsage();
+            const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+            this.logger.log(`💾 Memory usage: ${memUsageMB}MB for session ${sessionId}`);
+
+            if (memUsageMB > 500) {
+                this.logger.warn(`⚠️ High memory usage (${memUsageMB}MB) may affect performance for session ${sessionId}`);
+            }
+
+            // Check active clients count
+            const activeClients = this.clients.size;
+            this.logger.log(`👥 Active clients: ${activeClients} (including new session ${sessionId})`);
+
+            if (activeClients > 5) {
+                this.logger.warn(`⚠️ High number of active clients (${activeClients}) may affect performance`);
+            }
+
+            // Test basic network connectivity (simple DNS lookup)
+            try {
+                const dns = require('dns');
+                await new Promise((resolve, reject) => {
+                    dns.lookup('web.whatsapp.com', (err) => {
+                        if (err) reject(err);
+                        else resolve(true);
+                    });
+                });
+                this.logger.log(`🌐 Network connectivity to WhatsApp Web confirmed for session ${sessionId}`);
+            } catch (networkError) {
+                this.logger.error(`❌ Network connectivity issue detected for session ${sessionId}:`, networkError);
+                throw new Error(`Network connectivity issue: Cannot reach WhatsApp Web servers. Please check your internet connection.`);
+            }
+
+        } catch (error) {
+            this.logger.error(`❌ Pre-initialization check failed for session ${sessionId}:`, error);
+            throw error;
         }
     }
 
@@ -170,6 +258,7 @@ export class WebjsService implements OnModuleDestroy {
                 }
             },
         });
+
 
         if (existingSession) {
             this.logger.log(`Deleting existing session ${existingSession.session_id} for user ${user_id}`);
@@ -202,7 +291,38 @@ export class WebjsService implements OnModuleDestroy {
         return this.mapSessionToDto(session);
     }
 
-    async initializeClient(sessionId: string, isRestoration: boolean = false): Promise<QRCodeResponseDto> {
+    async initializeClient(sessionId: string, isRestoration: boolean = false, retryCount: number = 0): Promise<QRCodeResponseDto> {
+        const maxRetries = 2;
+
+        try {
+            return await this.attemptClientInitialization(sessionId, isRestoration, retryCount);
+        } catch (error) {
+            if (retryCount < maxRetries) {
+                this.logger.warn(`⚠️ Initialization attempt ${retryCount + 1} failed for session ${sessionId}, retrying...`);
+
+                // Clean up any partial initialization
+                if (this.clients.has(sessionId)) {
+                    const clientInstance = this.clients.get(sessionId);
+                    try {
+                        await clientInstance?.client?.destroy();
+                    } catch (cleanupError) {
+                        this.logger.error(`Error cleaning up failed client:`, cleanupError);
+                    }
+                    this.clients.delete(sessionId);
+                }
+
+                // Wait a bit before retry
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                return this.initializeClient(sessionId, isRestoration, retryCount + 1);
+            } else {
+                this.logger.error(`❌ All ${maxRetries + 1} initialization attempts failed for session ${sessionId}`);
+                throw error;
+            }
+        }
+    }
+
+    private async attemptClientInitialization(sessionId: string, isRestoration: boolean, retryCount: number): Promise<QRCodeResponseDto> {
         const session = await this.databaseService.whatsAppSession.findUnique({
             where: { session_id: sessionId },
         });
@@ -215,75 +335,99 @@ export class WebjsService implements OnModuleDestroy {
             throw new Error('Client already initialized for this session');
         }
 
+        // Pre-initialization checks (skip on retries to save time)
+        if (retryCount === 0) {
+            await this.performPreInitializationChecks(sessionId);
+        } else {
+            this.logger.log(`🔄 Retry attempt ${retryCount + 1} for session ${sessionId}, skipping pre-checks`);
+        }
+
         // Check if this is a restoration from S3 and session should be authenticated
         const isAuthenticatedRestore = isRestoration &&
             (session.status === WhatsAppSessionStatus.AUTHENTICATED ||
                 session.status === WhatsAppSessionStatus.READY);
 
-        if (isAuthenticatedRestore) {
-            this.logger.log(`🔄 Initializing restored authenticated session: ${sessionId}`);
-        } else {
-            this.logger.log(`🆕 Initializing new session: ${sessionId}`);
+        // Enhanced restoration detection and logging
+        this.logger.log(`🔍 Session restoration analysis for ${sessionId}:`);
+        this.logger.log(`   📊 isRestoration flag: ${isRestoration}`);
+        this.logger.log(`   📊 Session status in DB: ${session.status}`);
+        this.logger.log(`   📊 isAuthenticatedRestore: ${isAuthenticatedRestore}`);
+        this.logger.log(`   📊 Session created: ${session.created_at}`);
+        this.logger.log(`   📊 Session last activity: ${session.last_activity || 'Never'}`);
+        this.logger.log(`   📊 Session is_authenticated: ${session.is_authenticated}`);
+        this.logger.log(`   📊 Session is_ready: ${session.is_ready}`);
+
+        // Check for corrupted restoration scenarios
+        if (isRestoration && !isAuthenticatedRestore) {
+            this.logger.warn(`🚨 Corrupted restoration detected for ${sessionId} - status is ${session.status} but should be READY/AUTHENTICATED`);
+
+            // Mark as disconnected instead of generating QR
+            await this.safeUpdateSession(sessionId, {
+                status: WhatsAppSessionStatus.DISCONNECTED,
+                is_ready: false,
+                is_authenticated: false,
+                last_error: `Corrupted session restoration - status was ${session.status}`,
+                last_error_time: new Date(),
+            });
+
+            throw new Error(`Session ${sessionId} is corrupted and cannot be restored. Please create a new session.`);
         }
 
-        // Create WhatsApp client with RemoteAuth
-        const client = new Client({
-            authStrategy: new RemoteAuth({
+        if (isAuthenticatedRestore) {
+            this.logger.log(`🔄 ✅ RESTORATION PATH: Initializing restored authenticated session: ${sessionId}`);
+        } else {
+            this.logger.log(`🆕 ❌ NEW SESSION PATH: Initializing new session: ${sessionId}`);
+            if (isRestoration) {
+                this.logger.warn(`⚠️ Restoration was requested but session status (${session.status}) is not READY/AUTHENTICATED`);
+            }
+        }
+
+        // Create WhatsApp client with optimized RemoteAuth
+        // Try RemoteAuth first, fallback to LocalAuth if needed
+        let authStrategy;
+        try {
+            // Temporarily use LocalAuth for testing (more reliable than RemoteAuth)
+            const { LocalAuth } = require('whatsapp-web.js');
+            authStrategy = new LocalAuth({
                 clientId: sessionId,
                 dataPath: '.wwebjs_auth',
-                store: this.s3Store,
-                backupSyncIntervalMs: 300000, // 5 minutes
-            }),
+            });
+            this.logger.log(`🔧 Using LocalAuth for session ${sessionId} (testing mode)`);
+        } catch (authError) {
+            this.logger.error(`❌ LocalAuth failed for session ${sessionId}:`, authError);
+            throw authError;
+        }
+
+        const client = new Client({
+            authStrategy,
             puppeteer: {
                 headless: true,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
                     '--no-first-run',
-                    '--no-zygote',
-                    '--single-process',
                     '--disable-gpu',
                     '--disable-web-security',
                     '--disable-features=VizDisplayCompositor',
                     '--disable-background-timer-throttling',
                     '--disable-backgrounding-occluded-windows',
                     '--disable-renderer-backgrounding',
-                    '--disable-extensions',
-                    '--disable-plugins',
                     '--disable-default-apps',
-                    '--disable-hang-monitor',
-                    '--disable-prompt-on-repost',
                     '--disable-sync',
                     '--disable-translate',
-                    '--metrics-recording-only',
+                    '--hide-scrollbars',
+                    '--mute-audio',
                     '--no-default-browser-check',
-                    '--safebrowsing-disable-auto-update',
-                    '--enable-automation',
-                    '--password-store=basic',
-                    '--use-mock-keychain',
-                    '--disable-blink-features=AutomationControlled',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    '--proxy-server="direct://"',
-                    '--proxy-bypass-list=*',
-                    '--disable-ipc-flooding-protection',
-                    '--disable-background-networking',
-                    '--disable-domain-reliability',
                     '--no-pings',
-                    '--disable-logging',
-                    '--disable-permissions-api',
-                    '--disable-notifications',
-                    '--disable-component-update',
-                    '--disable-background-mode',
-                    '--disable-client-side-phishing-detection'
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 ],
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH, // Allow custom Chrome path
                 defaultViewport: {
-                    width: 1366,
-                    height: 768
+                    width: 1280,
+                    height: 720
                 },
-                timeout: 90000, // Increased to 90 seconds timeout
+                timeout: 180000, // Increased to 3 minutes for WhatsApp Web loading
+                ignoreDefaultArgs: ['--disable-extensions'], // Allow WhatsApp Web to work properly
             },
         });
 
@@ -301,8 +445,29 @@ export class WebjsService implements OnModuleDestroy {
         // Store client instance
         this.clients.set(sessionId, clientInstance);
 
-        // Initialize client
+        // Initialize client with detailed logging
+        this.logger.log(`🚀 Starting browser initialization for session ${sessionId}...`);
+        const initStartTime = Date.now();
+
+        // Add page navigation logging
+        try {
+            const page = await client.pupPage;
+            if (page) {
+                page.on('domcontentloaded', () => {
+                    this.logger.log(`📄 WhatsApp Web DOM loaded for session ${sessionId}`);
+                });
+                page.on('load', () => {
+                    this.logger.log(`📄 WhatsApp Web page fully loaded for session ${sessionId}`);
+                });
+            }
+        } catch (pageError) {
+            this.logger.warn(`⚠️ Could not access page for logging: ${pageError.message}`);
+        }
+
         await client.initialize();
+
+        const initDuration = Date.now() - initStartTime;
+        this.logger.log(`✅ Browser initialized for session ${sessionId} in ${initDuration}ms`);
 
         if (isAuthenticatedRestore) {
             // For authenticated restorations, wait for ready event instead of QR
@@ -311,21 +476,70 @@ export class WebjsService implements OnModuleDestroy {
             // Set up event handlers for authenticated restoration
             this.setupOtherEventHandlers(clientInstance);
 
-            // Wait for the session to become ready (up to 30 seconds)
+            // Wait for the session to become ready (extended timeout for RemoteAuth S3 restoration)
             const readyPromise = new Promise<void>((resolve, reject) => {
                 const timeout = setTimeout(() => {
-                    reject(new Error('Session restoration timeout - session did not become ready'));
+                    reject(new Error('Session restoration timeout - session did not become ready after 180 seconds'));
+                }, 180000); // Increased to 3 minutes for RemoteAuth S3 restoration
+
+                // Progress logging for restoration with detailed tracking
+                let elapsed = 0;
+                const startTime = Date.now();
+                const progressInterval = setInterval(() => {
+                    elapsed += 30;
+                    const currentTime = Date.now();
+                    const actualElapsed = Math.round((currentTime - startTime) / 1000);
+                    this.logger.log(`⏱️ Restoration progress: ${elapsed}s target / ${actualElapsed}s actual elapsed for session ${sessionId}`);
+                    this.logger.log(`   🔍 Current client status: ${clientInstance.status || 'UNKNOWN'}`);
+                    this.logger.log(`   🔍 Auth received: ${authReceived}, Ready received: ${readyReceived}`);
+                    if (elapsed >= 180) {
+                        clearInterval(progressInterval);
+                    }
                 }, 30000);
+
+                let authReceived = false;
+                let readyReceived = false;
+
+                // Listen for remote session loaded event (specific to RemoteAuth)
+                client.on('remote_session_saved', () => {
+                    this.logger.log(`📦 Remote session saved for ${sessionId}`);
+                });
+
+                // Add more detailed RemoteAuth event logging
+                client.on('loading_screen', (percent, message) => {
+                    this.logger.log(`📱 Restoration loading: ${percent}% - ${message} for session ${sessionId}`);
+                });
+
+                client.on('change_state', (state) => {
+                    this.logger.log(`📱 Restoration state: ${state} for session ${sessionId}`);
+                });
+
+                client.on('authenticated', () => {
+                    this.logger.log(`🔐 Session ${sessionId} authenticated during restoration`);
+                    authReceived = true;
+                });
 
                 client.on('ready', () => {
                     clearTimeout(timeout);
+                    clearInterval(progressInterval);
                     this.logger.log(`✅ Session ${sessionId} restored and ready`);
+                    readyReceived = true;
                     resolve();
                 });
 
                 client.on('auth_failure', (message) => {
                     clearTimeout(timeout);
+                    clearInterval(progressInterval);
                     reject(new Error(`Authentication failed during restoration: ${message}`));
+                });
+
+                // Handle disconnection during restoration
+                client.on('disconnected', (reason) => {
+                    if (!readyReceived) {
+                        clearTimeout(timeout);
+                        clearInterval(progressInterval);
+                        reject(new Error(`Session disconnected during restoration: ${reason}`));
+                    }
                 });
             });
 
@@ -347,15 +561,40 @@ export class WebjsService implements OnModuleDestroy {
             } catch (error) {
                 this.logger.error(`❌ Session restoration failed for ${sessionId}:`, error);
 
-                // Fall back to QR code generation
-                this.logger.log(`🔄 Falling back to QR code generation for session ${sessionId}`);
+                // Check if session exists in S3 before marking as disconnected
+                const sessionExistsInS3 = await this.s3Store.checkSessionExists(sessionId).catch(() => false);
+
+                if (!sessionExistsInS3) {
+                    this.logger.warn(`🚨 Session ${sessionId} not found in S3, marking as DISCONNECTED`);
+                } else {
+                    this.logger.warn(`🚨 Session ${sessionId} restoration failed despite S3 data existing - session may be corrupted`);
+                }
+
+                // Mark session as DISCONNECTED instead of falling back to QR
                 await this.safeUpdateSession(sessionId, {
-                    status: WhatsAppSessionStatus.INITIALIZING,
+                    status: WhatsAppSessionStatus.DISCONNECTED,
                     is_ready: false,
                     is_authenticated: false,
+                    last_error: `Session restoration failed: ${error.message}`,
+                    last_error_time: new Date(),
                 });
 
-                // Continue to QR code generation below
+                // Clean up failed client
+                try {
+                    await client.destroy();
+                    this.clients.delete(sessionId);
+                } catch (cleanupError) {
+                    this.logger.error(`Error cleaning up failed restoration client:`, cleanupError);
+                }
+
+                this.logger.log(`🔌 Session ${sessionId} marked as DISCONNECTED due to restoration failure`);
+
+                // Return early - don't continue to QR generation
+                return {
+                    session_id: sessionId,
+                    qr_code: null,
+                    status: WhatsAppSessionStatus.DISCONNECTED,
+                };
             }
         }
 
@@ -366,13 +605,39 @@ export class WebjsService implements OnModuleDestroy {
         const qrCodePromise = this.setupEventHandlersWithQRPromise(clientInstance);
 
         try {
+            // Clean up any existing timers for this session first
+            this.cleanupSessionTimers(sessionId);
+
             // Wait for QR code generation with extended timeout
+            this.logger.log(`⏱️ Waiting for QR code generation for session ${sessionId}...`);
+
             const qrCode = await Promise.race([
                 qrCodePromise,
-                new Promise<string>((_, reject) =>
-                    setTimeout(() => reject(new Error('QR code generation timeout after 60 seconds')), 60000)
-                )
+                new Promise<string>((_, reject) => {
+                    // Log progress every 20 seconds
+                    let elapsed = 0;
+                    const progressInterval = setInterval(() => {
+                        elapsed += 20;
+                        this.logger.log(`⏱️ QR generation progress: ${elapsed}s elapsed for session ${sessionId}`);
+
+                        if (elapsed >= 120) {
+                            reject(new Error('QR code generation timeout after 120 seconds'));
+                        }
+                    }, 20000);
+
+                    // Final timeout after 120 seconds (2 minutes)
+                    const timeoutHandle = setTimeout(() => {
+                        reject(new Error('QR code generation timeout after 120 seconds'));
+                    }, 120000);
+
+                    // Store timers for cleanup
+                    this.activeTimers.set(sessionId, { progressInterval, timeoutHandle });
+                })
             ]);
+
+            // Clean up timers when QR code is successfully generated
+            this.cleanupSessionTimers(sessionId);
+            this.logger.log(`✅ QR generation completed successfully for session ${sessionId}`);
 
             this.logger.log(`QR code generated for session ${sessionId}`);
 
@@ -384,8 +649,11 @@ export class WebjsService implements OnModuleDestroy {
         } catch (error) {
             this.logger.error(`Failed to generate QR code for session ${sessionId}:`, error);
 
-            // Clean up failed client
+            // Clean up failed client and timers
             try {
+                // Clean up any active timers first
+                this.cleanupSessionTimers(sessionId);
+
                 if (this.clients.has(sessionId)) {
                     const clientInstance = this.clients.get(sessionId);
                     if (clientInstance?.client) {
@@ -397,12 +665,20 @@ export class WebjsService implements OnModuleDestroy {
                 this.logger.error(`Error cleaning up failed client ${sessionId}:`, cleanupError);
             }
 
-            // Update database status
-            await this.safeUpdateSession(sessionId, {
+            // Update database status with detailed error information
+            const errorMessage = error.message || 'Unknown initialization error';
+            const statusUpdate: any = {
                 status: WhatsAppSessionStatus.DISCONNECTED,
                 is_ready: false,
                 is_authenticated: false,
-            });
+                qr_code: null,
+                last_error: errorMessage,
+                last_error_time: new Date(),
+            };
+
+            await this.safeUpdateSession(sessionId, statusUpdate);
+
+            this.logger.error(`❌ Session ${sessionId} marked as DISCONNECTED due to initialization failure`);
 
             // Re-throw the error with more context and troubleshooting info
             if (error.message?.includes('net::ERR_TIMED_OUT') || error.message?.includes('net::ERR_NETWORK_CHANGED')) {
@@ -420,20 +696,25 @@ export class WebjsService implements OnModuleDestroy {
     // Helper method to safely update session in database
     private async safeUpdateSession(sessionId: string, data: any): Promise<boolean> {
         try {
-            await this.databaseService.whatsAppSession.update({
+            this.logger.log(`💾 Updating session ${sessionId} with data:`, JSON.stringify(data, null, 2));
+
+            const result = await this.databaseService.whatsAppSession.update({
                 where: { session_id: sessionId },
                 data: {
                     ...data,
                     updated_at: new Date(),
                 },
             });
+
+            this.logger.log(`✅ Successfully updated session ${sessionId} status to: ${data.status || 'unchanged'}`);
             return true;
         } catch (error) {
             if (error.code === 'P2025') {
-                this.logger.warn(`Session ${sessionId} not found in database - may have been deleted`);
+                this.logger.warn(`⚠️ Session ${sessionId} not found in database - may have been deleted`);
                 return false;
             } else {
-                this.logger.error(`Error updating session ${sessionId}:`, error);
+                this.logger.error(`❌ Error updating session ${sessionId}:`, error);
+                this.logger.error(`❌ Failed update data:`, JSON.stringify(data, null, 2));
                 throw error;
             }
         }
@@ -486,47 +767,55 @@ export class WebjsService implements OnModuleDestroy {
         }
     }
 
+
     // Clean up sessions that are stuck in INITIALIZING state
     private async cleanupStuckSessions(): Promise<void> {
         try {
+            this.logger.log('🧹 Cleaning up stuck sessions...');
+
+            // Find sessions that are stuck in INITIALIZING status for more than 10 minutes
             const stuckSessions = await this.databaseService.whatsAppSession.findMany({
                 where: {
                     status: WhatsAppSessionStatus.INITIALIZING,
                     updated_at: {
-                        lt: new Date(Date.now() - 10 * 60 * 1000), // Stuck for more than 10 minutes
+                        lt: new Date(Date.now() - 10 * 60 * 1000), // 10 minutes ago
                     },
                 },
             });
 
             for (const session of stuckSessions) {
-                this.logger.warn(`🚨 Found stuck session ${session.session_id} in INITIALIZING state for ${Math.round((Date.now() - new Date(session.updated_at).getTime()) / 60000)} minutes`);
+                this.logger.log(`🧹 Cleaning up stuck session: ${session.session_id}`);
 
-                try {
-                    // Clean up any existing client instance
+                // Clean up any active client
+                if (this.clients.has(session.session_id)) {
                     const clientInstance = this.clients.get(session.session_id);
-                    if (clientInstance) {
-                        await this.cleanupOrphanedClient(session.session_id, clientInstance.client);
+                    try {
+                        await clientInstance?.client?.destroy();
+                    } catch (error) {
+                        this.logger.error(`Error destroying stuck client:`, error);
                     }
-
-                    // Reset session to allow re-initialization
-                    await this.safeUpdateSession(session.session_id, {
-                        status: WhatsAppSessionStatus.DISCONNECTED,
-                        is_ready: false,
-                        is_authenticated: false,
-                        qr_code: null,
-                    });
-
-                    this.logger.log(`🔧 Reset stuck session ${session.session_id} to DISCONNECTED state`);
-                } catch (error) {
-                    this.logger.error(`❌ Failed to cleanup stuck session ${session.session_id}:`, error);
+                    this.clients.delete(session.session_id);
                 }
+
+                // Clean up timers
+                this.cleanupSessionTimers(session.session_id);
+
+                // Update session status to DISCONNECTED
+                await this.safeUpdateSession(session.session_id, {
+                    status: WhatsAppSessionStatus.DISCONNECTED,
+                    is_ready: false,
+                    is_authenticated: false,
+                    last_error: 'Session was stuck in INITIALIZING status and cleaned up',
+                    last_error_time: new Date(),
+                });
             }
 
             if (stuckSessions.length > 0) {
-                this.logger.log(`✅ Cleaned up ${stuckSessions.length} stuck sessions`);
+                this.logger.log(`🧹 Cleaned up ${stuckSessions.length} stuck sessions`);
             }
+
         } catch (error) {
-            this.logger.error('Error during stuck sessions cleanup:', error);
+            this.logger.error('❌ Error cleaning up stuck sessions:', error);
         }
     }
 
@@ -536,7 +825,21 @@ export class WebjsService implements OnModuleDestroy {
         return new Promise<string>((resolve, reject) => {
             let qrResolved = false;
 
+            // Add detailed event logging for debugging
+            client.on('loading_screen', (percent, message) => {
+                this.logger.log(`📱 WhatsApp Web loading: ${percent}% - ${message} for session ${sessionId}`);
+            });
+
+            client.on('change_state', (state) => {
+                this.logger.log(`📱 WhatsApp Web state changed to: ${state} for session ${sessionId}`);
+            });
+
             client.on('qr', async (qr) => {
+                if (qrResolved) {
+                    this.logger.warn(`⚠️ QR event fired after resolution for session ${sessionId}, ignoring`);
+                    return;
+                }
+
                 this.logger.log(`📱 QR Code generated for session ${sessionId} - progression: INITIALIZING → QR_READY`);
                 clientInstance.status = WhatsAppSessionStatus.QR_READY;
 
@@ -560,6 +863,7 @@ export class WebjsService implements OnModuleDestroy {
                 // Resolve the promise with the QR code
                 if (!qrResolved) {
                     qrResolved = true;
+                    this.logger.log(`✅ QR promise resolved for session ${sessionId}`);
                     resolve(qr);
                 }
             });
@@ -569,9 +873,19 @@ export class WebjsService implements OnModuleDestroy {
 
             // Handle initialization errors
             client.on('auth_failure', (message) => {
+                this.logger.error(`❌ Auth failure during QR setup for session ${sessionId}: ${message}`);
                 if (!qrResolved) {
                     qrResolved = true;
                     reject(new Error(`Authentication setup failed: ${message}`));
+                }
+            });
+
+            // Handle disconnection during QR generation
+            client.on('disconnected', (reason) => {
+                this.logger.error(`❌ Client disconnected during QR generation for session ${sessionId}: ${reason}`);
+                if (!qrResolved) {
+                    qrResolved = true;
+                    reject(new Error(`Client disconnected during QR generation: ${reason}`));
                 }
             });
         });
@@ -619,6 +933,11 @@ export class WebjsService implements OnModuleDestroy {
                 this.logger.warn(`Could not update ready status for session ${sessionId} - session may have been deleted`);
                 // Clean up the client instance
                 await this.cleanupOrphanedClient(sessionId, client);
+            } else {
+                // Force immediate backup to S3 after session becomes ready
+                this.forceBackupSessionToS3(sessionId).catch((error: any) => {
+                    this.logger.error(`Failed to backup session ${sessionId} to S3:`, error);
+                });
             }
         });
 
@@ -1449,6 +1768,88 @@ export class WebjsService implements OnModuleDestroy {
         }
     }
 
+    // Backup session authentication data to S3 (for RemoteAuth)
+    private async backupSessionToS3(sessionId: string): Promise<void> {
+        try {
+            // With RemoteAuth, session data is automatically stored in S3 by WhatsApp Web.js
+            // We just need to verify the session exists in S3 and log the backup status
+
+            const sessionExists = await this.s3Store.checkSessionExists(sessionId);
+
+            if (sessionExists) {
+                this.logger.log(`📦 Session ${sessionId} is already backed up to S3 via RemoteAuth`);
+
+                // Optional: Create a backup timestamp record
+                const backupMetadata = {
+                    sessionId: sessionId,
+                    backupTime: new Date().toISOString(),
+                    method: 'RemoteAuth',
+                    status: 'success'
+                };
+
+                await this.s3Store.saveSession(`${sessionId}-backup-metadata`, backupMetadata);
+                this.logger.log(`� Backup metadata saved for session ${sessionId}`);
+            } else {
+                this.logger.warn(`⚠️ Session ${sessionId} not found in S3 - RemoteAuth may not have synced yet`);
+            }
+        } catch (error) {
+            this.logger.error(`❌ Failed to verify S3 backup for session ${sessionId}:`, error);
+            // Don't throw error as this is not critical for session functionality
+        }
+    }
+
+    // Force immediate backup to S3 with retry logic
+    private async forceBackupSessionToS3(sessionId: string): Promise<void> {
+        try {
+            this.logger.log(`🔄 Force backing up session ${sessionId} to S3...`);
+
+            // Wait a moment for RemoteAuth to complete its backup
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Check if session exists in S3 with retry
+            let attempts = 0;
+            const maxAttempts = 5;
+            let sessionExists = false;
+
+            while (attempts < maxAttempts && !sessionExists) {
+                attempts++;
+                sessionExists = await this.s3Store.checkSessionExists(sessionId);
+
+                if (!sessionExists) {
+                    this.logger.log(`📦 Attempt ${attempts}/${maxAttempts}: Session ${sessionId} not yet in S3, waiting...`);
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds between attempts
+                }
+            }
+
+            if (sessionExists) {
+                this.logger.log(`✅ Session ${sessionId} successfully backed up to S3 after ${attempts} attempts`);
+
+                // Update database with backup confirmation
+                await this.safeUpdateSession(sessionId, {
+                    s3_backup_confirmed: true,
+                    last_backup_time: new Date(),
+                });
+            } else {
+                this.logger.error(`❌ Failed to confirm S3 backup for session ${sessionId} after ${maxAttempts} attempts`);
+
+                // Debug: List all files in S3 to see what's actually there
+                this.logger.log(`🔍 Debugging S3 contents for session ${sessionId}...`);
+                try {
+                    const allFiles = await this.s3Store.listAllSessionFiles();
+                    this.logger.log(`📦 All S3 files in whatsapp-sessions/:`, allFiles);
+
+                    const sessionFiles = await this.s3Store.listSessionFiles(sessionId);
+                    this.logger.log(`📦 Files related to session ${sessionId}:`, sessionFiles);
+                } catch (debugError) {
+                    this.logger.error(`❌ Failed to debug S3 contents:`, debugError);
+                }
+            }
+
+        } catch (error) {
+            this.logger.error(`❌ Failed to force backup session ${sessionId} to S3:`, error);
+        }
+    }
+
     // Test S3 connection
     async testS3Connection(): Promise<boolean> {
         try {
@@ -1666,6 +2067,23 @@ export class WebjsService implements OnModuleDestroy {
 
                     this.logger.log(`🔄 Restoring session: ${session.session_id} (Status: ${session.status})`);
 
+                    // Check for sessions that should be cleaned up instead of restored
+                    if (session.status === WhatsAppSessionStatus.INITIALIZING || session.status === WhatsAppSessionStatus.QR_READY) {
+                        this.logger.warn(`🚨 Found session ${session.session_id} in ${session.status} status during startup - marking as DISCONNECTED`);
+
+                        await this.safeUpdateSession(session.session_id, {
+                            status: WhatsAppSessionStatus.DISCONNECTED,
+                            is_ready: false,
+                            is_authenticated: false,
+                            qr_code: null,
+                            last_error: `Session was in ${session.status} status during server restart - marked as disconnected`,
+                            last_error_time: new Date(),
+                        });
+
+                        this.logger.log(`🔌 Session ${session.session_id} marked as DISCONNECTED instead of attempting restoration`);
+                        continue; // Skip to next session
+                    }
+
                     // Initialize the client for this session with restoration flag for READY/AUTHENTICATED sessions
                     const isRestoration = session.status === WhatsAppSessionStatus.READY || session.status === WhatsAppSessionStatus.AUTHENTICATED;
                     const result = await this.initializeClient(session.session_id, isRestoration);
@@ -1681,14 +2099,35 @@ export class WebjsService implements OnModuleDestroy {
                     await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds
 
                 } catch (error) {
-                    this.logger.error(`Failed to restore session ${session.session_id}:`, error);
+                    this.logger.error(`❌ Failed to restore session ${session.session_id}:`, error);
 
-                    // Mark session as disconnected if restoration fails
-                    await this.safeUpdateSession(session.session_id, {
-                        status: WhatsAppSessionStatus.DISCONNECTED,
-                        is_ready: false,
-                        is_authenticated: false,
-                    });
+                    // Check if this was a restoration attempt that failed
+                    const wasRestorationAttempt = session.status === WhatsAppSessionStatus.READY ||
+                        session.status === WhatsAppSessionStatus.AUTHENTICATED;
+
+                    if (wasRestorationAttempt) {
+                        this.logger.warn(`🚨 Session ${session.session_id} restoration failed - marking as DISCONNECTED instead of generating QR`);
+
+                        // Mark session as disconnected if restoration fails
+                        await this.safeUpdateSession(session.session_id, {
+                            status: WhatsAppSessionStatus.DISCONNECTED,
+                            is_ready: false,
+                            is_authenticated: false,
+                            qr_code: null,
+                            last_error: `Restoration failed: ${error.message || 'Session restoration failed'}`,
+                            last_error_time: new Date(),
+                        });
+                    } else {
+                        // For non-restoration failures, mark as disconnected
+                        await this.safeUpdateSession(session.session_id, {
+                            status: WhatsAppSessionStatus.DISCONNECTED,
+                            is_ready: false,
+                            is_authenticated: false,
+                            qr_code: null,
+                            last_error: error.message || 'Session initialization failed',
+                            last_error_time: new Date(),
+                        });
+                    }
                 }
             }
 

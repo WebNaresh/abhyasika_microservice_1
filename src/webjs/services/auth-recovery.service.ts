@@ -30,7 +30,7 @@ export class AuthRecoveryService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly s3Store: CustomS3Store,
-  ) {}
+  ) { }
 
   /**
    * Check if authentication folder exists and has valid session data
@@ -94,16 +94,10 @@ export class AuthRecoveryService {
     try {
       this.logger.log(`🔄 Attempting S3 restore for session ${sessionId}...`);
 
-      // Check if session exists in S3
+      // Check if session backup exists in S3 (zip file)
       const sessionExists = await this.s3Store.checkSessionExists(sessionId);
       if (!sessionExists) {
-        return { success: false, error: 'Session not found in S3' };
-      }
-
-      // Get session data from S3
-      const sessionData = await this.s3Store.getSession(sessionId);
-      if (!sessionData) {
-        return { success: false, error: 'Empty session data in S3' };
+        return { success: false, error: 'Session backup not found in S3' };
       }
 
       // Create auth folder if it doesn't exist
@@ -112,15 +106,40 @@ export class AuthRecoveryService {
         this.logger.log(`📁 Created authentication folder: ${this.authFolderPath}`);
       }
 
-      // Create session-specific folder
-      const sessionAuthPath = path.join(this.authFolderPath, sessionId);
-      if (!fs.existsSync(sessionAuthPath)) {
-        fs.mkdirSync(sessionAuthPath, { recursive: true });
-      }
+      // Download and extract the session backup
+      const tempZipPath = `${sessionId}-restore.zip`;
 
-      // Write session data to local file (simplified approach)
-      const sessionFilePath = path.join(sessionAuthPath, 'session.json');
-      fs.writeFileSync(sessionFilePath, JSON.stringify(sessionData, null, 2));
+      try {
+        // Download zip file from S3
+        await this.s3Store.downloadSessionBackup(sessionId, tempZipPath);
+        this.logger.log(`📥 Downloaded session backup for ${sessionId} from S3`);
+
+        // Extract zip file to auth folder
+        const AdmZip = require('adm-zip');
+        const zip = new AdmZip(tempZipPath);
+        const sessionAuthPath = path.join(this.authFolderPath, sessionId);
+
+        // Remove existing session folder if it exists
+        if (fs.existsSync(sessionAuthPath)) {
+          fs.rmSync(sessionAuthPath, { recursive: true, force: true });
+        }
+
+        // Extract zip contents to session folder
+        zip.extractAllTo(sessionAuthPath, true);
+
+        // Clean up temporary zip file
+        fs.unlinkSync(tempZipPath);
+
+        this.logger.log(`📂 Extracted session backup for ${sessionId} to ${sessionAuthPath}`);
+      } catch (extractError) {
+        // Clean up temporary file on error
+        try {
+          fs.unlinkSync(tempZipPath);
+        } catch (cleanupError) {
+          // Ignore cleanup errors
+        }
+        throw extractError;
+      }
 
       this.logger.log(`✅ Successfully restored session ${sessionId} from S3`);
       return { success: true };
@@ -173,7 +192,7 @@ export class AuthRecoveryService {
           // First, try S3 restore for READY sessions
           if (session.status === WhatsAppSessionStatus.READY) {
             const s3Result = await this.attemptS3Restore(sessionId);
-            
+
             if (s3Result.success) {
               results.push({
                 sessionId,
@@ -181,13 +200,13 @@ export class AuthRecoveryService {
                 success: true,
               });
               s3Restored++;
-              
+
               // Update session status to indicate it's restored but needs re-initialization
               await this.updateSessionStatus(sessionId, WhatsAppSessionStatus.AUTHENTICATED, {
                 is_ready: false,
                 is_authenticated: true,
               });
-              
+
               continue;
             } else {
               this.logger.warn(`⚠️ S3 restore failed for ${sessionId}: ${s3Result.error}`);
@@ -279,8 +298,8 @@ export class AuthRecoveryService {
       }
 
       // Session needs recovery if it was previously authenticated but has no local files
-      return session.status === WhatsAppSessionStatus.READY || 
-             session.status === WhatsAppSessionStatus.AUTHENTICATED;
+      return session.status === WhatsAppSessionStatus.READY ||
+        session.status === WhatsAppSessionStatus.AUTHENTICATED;
 
     } catch (error) {
       this.logger.error(`❌ Error checking recovery need for session ${sessionId}:`, error);
@@ -335,7 +354,7 @@ export class AuthRecoveryService {
 
     } catch (error) {
       this.logger.error(`❌ Recovery failed for session ${sessionId}:`, error);
-      
+
       await this.updateSessionStatus(sessionId, WhatsAppSessionStatus.DISCONNECTED, {
         is_ready: false,
         is_authenticated: false,

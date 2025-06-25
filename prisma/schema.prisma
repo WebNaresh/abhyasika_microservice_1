@@ -802,20 +802,24 @@ model ReferralModel {
 }
 
 model WhatsAppSession {
-  id               String                @id @default(cuid())
-  user_id          String
-  user             User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  session_id       String                @unique
-  session_name     String?
-  phone_number     String?
-  is_authenticated Boolean               @default(false)
-  is_ready         Boolean               @default(false)
-  qr_code          String?
-  status           WhatsAppSessionStatus @default(INITIALIZING)
-  s3_session_key   String? // S3 key for session data
-  last_activity    DateTime?
-  created_at       DateTime              @default(now())
-  updated_at       DateTime              @updatedAt
+  id                  String                @id @default(cuid())
+  user_id             String
+  user                User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  session_id          String                @unique
+  session_name        String?
+  phone_number        String?
+  is_authenticated    Boolean               @default(false)
+  is_ready            Boolean               @default(false)
+  qr_code             String?
+  status              WhatsAppSessionStatus @default(INITIALIZING)
+  s3_session_key      String? // S3 key for session data
+  s3_backup_confirmed Boolean?              @default(false) // Whether S3 backup is confirmed
+  last_backup_time    DateTime? // Last successful backup time
+  last_error          String? // Last error message
+  last_error_time     DateTime? // When the last error occurred
+  last_activity       DateTime?
+  created_at          DateTime              @default(now())
+  updated_at          DateTime              @updatedAt
 
   @@index([user_id])
   @@index([session_id])

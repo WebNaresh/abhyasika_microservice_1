@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Logger } from '@nestjs/common';
 
 export interface S3StoreConfig {
@@ -62,7 +62,86 @@ export class CustomS3Store {
    * Check if a session exists in S3 (helper method)
    */
   async checkSessionExists(sessionId: string): Promise<boolean> {
-    return await this.sessionExists({ session: sessionId });
+    try {
+      // First try the standard pattern
+      const standardExists = await this.sessionExists({ session: sessionId });
+      if (standardExists) {
+        return true;
+      }
+
+      // If not found, search for any files related to this session
+      this.logger.log(`🔍 Searching for session ${sessionId} in S3 with different patterns...`);
+      const sessionFiles = await this.listSessionFiles(sessionId);
+
+      if (sessionFiles.length > 0) {
+        this.logger.log(`📦 Found ${sessionFiles.length} files for session ${sessionId}:`, sessionFiles);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      this.logger.error(`Error checking session existence for ${sessionId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * List all files related to a session in S3
+   */
+  async listSessionFiles(sessionId: string): Promise<string[]> {
+    try {
+      const command = new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: this.remoteDataPath,
+        MaxKeys: 100,
+      });
+
+      const response = await this.s3Client.send(command);
+      const files: string[] = [];
+
+      if (response.Contents) {
+        for (const object of response.Contents) {
+          if (object.Key && object.Key.includes(sessionId)) {
+            files.push(object.Key);
+          }
+        }
+      }
+
+      return files;
+    } catch (error) {
+      this.logger.error(`Error listing session files for ${sessionId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * List all files in the WhatsApp sessions directory
+   */
+  async listAllSessionFiles(): Promise<string[]> {
+    try {
+      const command = new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: this.remoteDataPath,
+        MaxKeys: 100,
+      });
+
+      const response = await this.s3Client.send(command);
+      const files: string[] = [];
+
+      if (response.Contents) {
+        for (const object of response.Contents) {
+          if (object.Key) {
+            files.push(object.Key);
+          }
+        }
+      }
+
+      this.logger.log(`📦 Found ${files.length} total files in S3:`, files);
+      return files;
+    } catch (error) {
+      this.logger.error('Error listing all session files:', error);
+      return [];
+    }
   }
 
   /**
@@ -145,6 +224,36 @@ export class CustomS3Store {
   }
 
   /**
+   * Download session backup zip file from S3
+   */
+  async downloadSessionBackup(sessionId: string, localPath: string): Promise<void> {
+    try {
+      const key = `whatsapp-sessions/${sessionId}.zip`;
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        throw new Error('Empty response body from S3');
+      }
+
+      const fs = require('fs');
+
+      // Convert stream to buffer for binary data
+      const buffer = await this.streamToBuffer(response.Body);
+      fs.writeFileSync(localPath, buffer);
+
+      this.logger.log(`Session backup ${sessionId} downloaded from S3 successfully`);
+    } catch (error) {
+      this.logger.error(`Error downloading session backup ${sessionId} from S3:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Generate S3 key for session
    */
   private getSessionKey(sessionId: string): string {
@@ -160,6 +269,18 @@ export class CustomS3Store {
       stream.on('data', (chunk: any) => chunks.push(chunk));
       stream.on('error', reject);
       stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    });
+  }
+
+  /**
+   * Convert readable stream to buffer (for binary data)
+   */
+  private async streamToBuffer(stream: any): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: any[] = [];
+      stream.on('data', (chunk: any) => chunks.push(chunk));
+      stream.on('error', reject);
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
     });
   }
 
@@ -208,6 +329,8 @@ export class CustomS3Store {
    */
   async save(sessionData: any): Promise<void> {
     const sessionId = sessionData.clientId || 'default';
+    this.logger.log(`📦 RemoteAuth save called for session ${sessionId}`);
+    this.logger.log(`📦 Session data keys:`, Object.keys(sessionData || {}));
     await this.saveSession(sessionId, sessionData);
   }
 
@@ -215,7 +338,10 @@ export class CustomS3Store {
    * Extract/get session data (whatsapp-web.js Store interface)
    */
   async extract(options: { session: string }): Promise<any> {
-    return await this.getSession(options.session);
+    this.logger.log(`📦 RemoteAuth extract called for session ${options.session}`);
+    const result = await this.getSession(options.session);
+    this.logger.log(`📦 Extract result for ${options.session}:`, result ? 'Found' : 'Not found');
+    return result;
   }
 
   /**

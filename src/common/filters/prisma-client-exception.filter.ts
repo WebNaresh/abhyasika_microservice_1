@@ -155,7 +155,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (exception instanceof BadRequestException) {
         console.log('i am here1');
         exception = exception as BadRequestException;
-        message = exception.response.message.join(', ');
+        message = Array.isArray(exception.response.message)
+          ? exception.response.message.join(', ')
+          : exception.response.message;
         console.log(`🚀 ~ file: prisma-client-exception.filter.ts:85 ~ AllExceptionsFilter ~ message:`, message)
         status = exception.getStatus
           ? exception.getStatus()
