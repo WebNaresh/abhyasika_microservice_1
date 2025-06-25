@@ -254,6 +254,76 @@ Retrieves the QR code for WhatsApp authentication. If the QR code is not ready y
 }
 ```
 
+#### 📤 Send Bulk Messages
+
+**POST** `/webjs/sessions/{sessionId}/send-bulk-messages`
+
+Send multiple personalized messages to different recipients in a single request.
+
+**Features:**
+
+- ✅ **Rate Limiting**: 1-2 second delays between messages
+- ✅ **Error Handling**: Continue sending even if some fail
+- ✅ **Media Support**: Include images, documents, etc.
+- ✅ **Validation**: International phone number format required
+- ✅ **Audit Logging**: All attempts logged for tracking
+- ✅ **Limit**: Maximum 50 messages per request
+
+**Request Body:**
+
+```json
+{
+  "messages": [
+    {
+      "to": "+919370928324",
+      "message": "Hey did you check the message?"
+    },
+    {
+      "to": "+919876543210",
+      "message": "Your payment is due tomorrow"
+    },
+    {
+      "to": "+918765432109",
+      "message": "Meeting scheduled for 3 PM",
+      "media_urls": ["https://example.com/meeting-agenda.pdf"]
+    }
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "success": true,
+  "total_messages": 3,
+  "successful_sends": 2,
+  "failed_sends": 1,
+  "results": [
+    {
+      "to": "+919370928324",
+      "status": "success",
+      "message_id": "wamid.xxx",
+      "timestamp": "2024-01-15T12:00:00Z"
+    },
+    {
+      "to": "+919876543210",
+      "status": "failed",
+      "error": "Invalid phone number format",
+      "timestamp": "2024-01-15T12:00:01Z"
+    },
+    {
+      "to": "+918765432109",
+      "status": "success",
+      "message_id": "wamid.yyy",
+      "timestamp": "2024-01-15T12:00:03Z"
+    }
+  ],
+  "session_id": "user_123456789",
+  "duration": "5.2 seconds"
+}
+```
+
 #### 🔄 Restart Session
 
 **POST** `/webjs/sessions/{sessionId}/restart`
@@ -818,27 +888,58 @@ DEBUG=whatsapp-web.js:*
 
 ### Health Check Endpoint
 
-Add this to your controller for monitoring:
+**GET** `/webjs/health`
 
-```typescript
-@Get('health')
-@ApiOperation({ summary: 'Health check for WhatsApp service' })
-async healthCheck() {
-  const activeSessions = this.webjsService.getActiveSessions();
-  const totalSessions = await this.webjsService.getTotalSessionsCount();
+Returns comprehensive service health status including authentication folder integrity:
 
-  return {
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    active_sessions: activeSessions.length,
-    total_sessions: totalSessions,
-    memory_usage: process.memoryUsage(),
-    uptime: process.uptime()
-  };
+```json
+{
+  "status": "healthy",
+  "timestamp": "2024-01-15T12:00:00Z",
+  "active_sessions": 2,
+  "total_sessions": 5,
+  "s3_connection": true,
+  "network_connectivity": true,
+  "auth_folder_status": true,
+  "memory_usage": {
+    "rss": 123456789,
+    "heapTotal": 87654321,
+    "heapUsed": 65432109,
+    "external": 12345678
+  },
+  "uptime": 3600
 }
 ```
 
-**Note**: The health check endpoint is now available at `GET /webjs/health` and includes improved error handling and database session counting.
+### Authentication Recovery Endpoint
+
+**POST** `/webjs/recovery/auth`
+
+Manually trigger authentication recovery process when authentication files are missing:
+
+```json
+{
+  "success": true,
+  "totalSessions": 3,
+  "s3Restored": 2,
+  "qrRegenerated": 1,
+  "failed": 0,
+  "duration": "5.2 seconds",
+  "results": [
+    {
+      "sessionId": "user_123",
+      "recoveryMethod": "S3_RESTORED",
+      "success": true
+    },
+    {
+      "sessionId": "user_456",
+      "recoveryMethod": "QR_REGENERATED",
+      "success": true,
+      "requiresQRScan": true
+    }
+  ]
+}
+```
 
 ## � Recent Fixes & Improvements
 
@@ -864,6 +965,15 @@ The service now includes robust error handling for database operations:
 - **Connection Testing**: Built-in S3 connection testing and health monitoring
 - **Session Persistence**: Reliable session storage and retrieval from AWS S3
 - **Error Handling**: Comprehensive error handling for S3 operations
+
+### Authentication Recovery System
+
+- **Automatic Detection**: Detects missing `.wwebjs_auth` folders on startup
+- **S3 Restoration**: Attempts to restore sessions from S3 storage first
+- **QR Fallback**: Generates new QR codes if S3 restoration fails
+- **Smart Recovery**: Different recovery strategies based on session status
+- **Resilient Deployment**: Handles server redeployments and auth folder deletion
+- **Manual Recovery**: API endpoint for manual recovery triggering
 
 ### Error Recovery
 

@@ -19,6 +19,7 @@ import {
 import { WebjsService } from './webjs.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { SendBulkMessageDto, SendBulkMessageResponseDto } from './dto/bulk-message.dto';
 import { SessionStatusDto, QRCodeResponseDto, SessionListDto } from './dto/session-status.dto';
 
 @ApiTags('WhatsApp Web Sessions')
@@ -26,6 +27,70 @@ import { SessionStatusDto, QRCodeResponseDto, SessionListDto } from './dto/sessi
 @ApiExtraModels(SessionStatusDto, QRCodeResponseDto, SessionListDto)
 export class WebjsController {
   constructor(private readonly webjsService: WebjsService) { }
+
+  // Helper method to format WhatsApp error messages for user-friendly responses
+  private formatWhatsAppError(errorMessage: string): { message: string; statusCode: number } {
+    if (!errorMessage) {
+      return { message: 'An unknown error occurred', statusCode: HttpStatus.INTERNAL_SERVER_ERROR };
+    }
+
+    // Parse structured error messages
+    if (errorMessage.includes('WHATSAPP_QR_REQUIRED:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `🔗 WhatsApp Device Linking Required\n\n${message}\n\n📱 Steps to link your device:\n1. Open WhatsApp on your phone\n2. Go to Settings → Linked Devices\n3. Tap "Link a Device"\n4. Scan the QR code\n\n🔍 Get QR Code: GET /webjs/sessions/${sessionId}/qr`,
+        statusCode: HttpStatus.PRECONDITION_REQUIRED
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_DISCONNECTED:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `📱 WhatsApp Disconnected\n\n${message}\n\n🔄 To reconnect:\n1. Initialize a new session: POST /webjs/sessions/${sessionId}/initialize\n2. Scan the new QR code with your phone\n3. Wait for connection to be established`,
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_QR_MISSING:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `🔄 WhatsApp Reconnection Needed\n\n${message}\n\n🚀 To reconnect:\n1. Reinitialize: POST /webjs/sessions/${sessionId}/initialize\n2. Scan the new QR code\n3. Complete the linking process`,
+        statusCode: HttpStatus.GONE
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_INIT_FAILED:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `❌ WhatsApp Initialization Failed\n\n${message}\n\n🆘 Troubleshooting:\n1. Try creating a new session\n2. Check your internet connection\n3. Contact support if the issue persists`,
+        statusCode: HttpStatus.FAILED_DEPENDENCY
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_NOT_READY:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `⏳ WhatsApp Not Ready\n\n${message}\n\n🔧 Next steps:\n1. Initialize your connection: POST /webjs/sessions/${sessionId}/initialize\n2. Complete the authentication process\n3. Wait for the status to become READY`,
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE
+      };
+    }
+
+    // Default error handling
+    return {
+      message: errorMessage,
+      statusCode: HttpStatus.BAD_REQUEST
+    };
+  }
 
   @Post('sessions')
   @ApiOperation({
@@ -211,7 +276,43 @@ export class WebjsController {
     }
   }
 
-
+  @Get('sessions/:sessionId/qr-status')
+  @ApiOperation({
+    summary: 'Get QR code status and instructions',
+    description: 'Returns the current QR code status and provides clear instructions for next steps. Useful for checking if QR code scanning is required.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID (same as user ID)',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'QR status retrieved successfully',
+    example: {
+      session_id: 'user_123456789',
+      status: 'QR_READY',
+      requires_qr_scan: true,
+      qr_code_available: true,
+      instructions: 'Please scan the QR code with your WhatsApp mobile app to complete authentication.',
+      next_steps: [
+        'Open WhatsApp on your mobile device',
+        'Go to Settings > Linked Devices',
+        'Tap "Link a Device"',
+        'Scan the QR code displayed'
+      ]
+    }
+  })
+  async getQRStatus(@Param('sessionId') sessionId: string) {
+    try {
+      return await this.webjsService.getQRStatus(sessionId);
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to get QR status',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
 
   @Post('sessions/:sessionId/send-message')
   @ApiOperation({
@@ -269,9 +370,200 @@ export class WebjsController {
       sendMessageDto.session_id = sessionId;
       return await this.webjsService.sendMessage(sendMessageDto);
     } catch (error) {
+      // Check if session is stuck in QR_READY state
+      if (error.message && error.message.includes('Current status: QR_READY')) {
+        try {
+          // Auto-clear and reinitialize the session for fresh start
+          await this.webjsService.clearAndReinitializeSession(sessionId);
+
+          // Return user-friendly response with fresh QR code instructions
+          throw new HttpException(
+            {
+              message: '🔄 WhatsApp Session Reset',
+              details: 'Your WhatsApp session has been cleared and reset for a fresh start.',
+              instructions: [
+                '1. Get the new QR code using: GET /webjs/sessions/' + sessionId + '/qr',
+                '2. Open WhatsApp on your phone',
+                '3. Go to Settings → Linked Devices',
+                '4. Tap "Link a Device"',
+                '5. Scan the new QR code',
+                '6. Try sending your message again'
+              ],
+              qr_endpoint: `/webjs/sessions/${sessionId}/qr`,
+              status_endpoint: `/webjs/sessions/${sessionId}/status`,
+              session_cleared: true,
+              ready_for_new_qr: true
+            },
+            HttpStatus.RESET_CONTENT, // 205 - indicates content has been reset
+          );
+        } catch (clearError) {
+          // If clearing fails, fall back to original error handling
+          const formattedError = this.formatWhatsAppError(error.message);
+          throw new HttpException(
+            formattedError.message,
+            formattedError.statusCode,
+          );
+        }
+      }
+
+      // For other errors, use normal error formatting
+      const formattedError = this.formatWhatsAppError(error.message);
       throw new HttpException(
-        error.message || 'Failed to send message',
-        HttpStatus.BAD_REQUEST,
+        formattedError.message,
+        formattedError.statusCode,
+      );
+    }
+  }
+
+  @Post('sessions/:sessionId/send-bulk-messages')
+  @ApiOperation({
+    summary: 'Send bulk WhatsApp messages',
+    description: 'Sends multiple personalized WhatsApp messages to different recipients in a single request. Includes rate limiting and detailed error handling.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID (same as user ID)',
+    example: 'user_123456789'
+  })
+  @ApiBody({
+    type: SendBulkMessageDto,
+    description: 'Bulk message data containing array of messages to send',
+    examples: {
+      'Basic Text Messages': {
+        value: {
+          messages: [
+            {
+              to: '+919370928324',
+              message: 'Hey did you check the message?'
+            },
+            {
+              to: '+919876543210',
+              message: 'Your payment is due tomorrow'
+            },
+            {
+              to: '+918765432109',
+              message: 'Meeting scheduled for 3 PM'
+            }
+          ]
+        }
+      },
+      'Messages with Media': {
+        value: {
+          messages: [
+            {
+              to: '+919370928324',
+              message: 'Check out this image!',
+              media_urls: ['https://example.com/image.jpg']
+            },
+            {
+              to: '+919876543210',
+              message: 'Here is your invoice',
+              media_urls: ['https://example.com/invoice.pdf']
+            }
+          ]
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Bulk messages processed successfully',
+    type: SendBulkMessageResponseDto,
+    example: {
+      success: true,
+      total_messages: 3,
+      successful_sends: 2,
+      failed_sends: 1,
+      results: [
+        {
+          to: '+919370928324',
+          status: 'success',
+          message_id: 'wamid.HBgNOTE5ODc2NTQzMjEwFQIAERgSMkE4OEJDMEM4RjA4NzY4OTMA',
+          timestamp: '2024-01-15T12:00:00Z'
+        },
+        {
+          to: '+919876543210',
+          status: 'failed',
+          error: 'Invalid phone number format',
+          timestamp: '2024-01-15T12:00:01Z'
+        },
+        {
+          to: '+918765432109',
+          status: 'success',
+          message_id: 'wamid.HBgNOTE5ODc2NTQzMjEwFQIAERgSMkE4OEJDMEM4RjA4NzY4OTMB',
+          timestamp: '2024-01-15T12:00:03Z'
+        }
+      ],
+      session_id: 'user_123456789',
+      duration: '5.2 seconds'
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - validation errors or session not ready',
+    example: {
+      statusCode: 400,
+      message: 'Client not initialized for session user_123456789. Current status: QR_READY. Please initialize the client first.',
+      error: 'Bad Request'
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Session not found',
+    example: {
+      statusCode: 404,
+      message: 'Session user_123456789 not found. Please create a session first.',
+      error: 'Not Found'
+    }
+  })
+  async sendBulkMessages(
+    @Param('sessionId') sessionId: string,
+    @Body() sendBulkMessageDto: SendBulkMessageDto
+  ) {
+    try {
+      return await this.webjsService.sendBulkMessages(sessionId, sendBulkMessageDto);
+    } catch (error) {
+      // Check if session is stuck in QR_READY state
+      if (error.message && error.message.includes('Current status: QR_READY')) {
+        try {
+          // Auto-clear and reinitialize the session for fresh start
+          await this.webjsService.clearAndReinitializeSession(sessionId);
+
+          // Return user-friendly response with fresh QR code instructions
+          throw new HttpException(
+            {
+              message: '🔄 WhatsApp Session Reset for Bulk Messaging',
+              details: 'Your WhatsApp session has been cleared and reset for a fresh start.',
+              instructions: [
+                '1. Get the new QR code using: GET /webjs/sessions/' + sessionId + '/qr',
+                '2. Open WhatsApp on your phone',
+                '3. Go to Settings → Linked Devices',
+                '4. Tap "Link a Device"',
+                '5. Scan the new QR code',
+                '6. Try sending your bulk messages again'
+              ],
+              qr_endpoint: `/webjs/sessions/${sessionId}/qr`,
+              status_endpoint: `/webjs/sessions/${sessionId}/status`,
+              session_cleared: true,
+              ready_for_new_qr: true
+            },
+            HttpStatus.RESET_CONTENT,
+          );
+        } catch (clearError) {
+          // If clearing fails, fall back to original error handling
+          const formattedError = this.formatWhatsAppError(error.message);
+          throw new HttpException(
+            formattedError.message,
+            formattedError.statusCode,
+          );
+        }
+      }
+
+      // For other errors, use normal error formatting
+      const formattedError = this.formatWhatsAppError(error.message);
+      throw new HttpException(
+        formattedError.message,
+        formattedError.statusCode,
       );
     }
   }
@@ -582,6 +874,66 @@ export class WebjsController {
     }
   }
 
+  @Get('sessions/:sessionId/diagnostics')
+  @ApiOperation({
+    summary: 'Comprehensive session diagnostics',
+    description: 'Performs comprehensive analysis of session state including S3 storage, local cache, database, and memory synchronization. Provides detailed recommendations for fixing issues.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID to diagnose',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Comprehensive diagnostics completed',
+    example: {
+      sessionId: 'user_123456789',
+      timestamp: '2024-01-15T12:00:00Z',
+      database: {
+        exists: true,
+        status: 'QR_READY',
+        isReady: false,
+        isAuthenticated: false
+      },
+      s3Storage: {
+        exists: true,
+        dataSize: 1024,
+        dataPreview: {
+          hasWAToken1: true,
+          hasWAToken2: true
+        }
+      },
+      localAuth: {
+        folderExists: true,
+        sessionFolderExists: false,
+        files: []
+      },
+      memoryClient: {
+        exists: true,
+        isReady: false,
+        status: 'QR_READY'
+      },
+      analysis: {
+        issues: ['Session stuck in QR_READY state'],
+        recommendations: ['Scan QR code with WhatsApp mobile app'],
+        syncStatus: 'PARTIAL_SYNC',
+        canRecover: true,
+        recoveryMethod: 'S3_RESTORE'
+      }
+    }
+  })
+  async getSessionDiagnostics(@Param('sessionId') sessionId: string) {
+    try {
+      return await this.webjsService.getSessionDiagnostics(sessionId);
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to get session diagnostics',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('sessions/:sessionId/restore')
   @ApiOperation({
     summary: 'Restore session from database',
@@ -629,6 +981,7 @@ export class WebjsController {
       total_sessions: 10,
       s3_connection: true,
       network_connectivity: true,
+      auth_folder_status: true,
       memory_usage: {
         rss: 123456789,
         heapTotal: 87654321,
@@ -644,6 +997,7 @@ export class WebjsController {
       const totalSessions = await this.webjsService.getTotalSessionsCount();
       const s3Status = await this.webjsService.testS3Connection();
       const networkStatus = await this.webjsService.testNetworkConnectivity();
+      const authFolderStatus = await this.webjsService.checkAuthFolderStatus();
 
       return {
         status: 'healthy',
@@ -652,6 +1006,7 @@ export class WebjsController {
         total_sessions: totalSessions,
         s3_connection: s3Status,
         network_connectivity: networkStatus,
+        auth_folder_status: authFolderStatus,
         memory_usage: process.memoryUsage(),
         uptime: process.uptime()
       };
@@ -659,6 +1014,112 @@ export class WebjsController {
       throw new HttpException(
         'Health check failed',
         HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('recovery/auth')
+  @ApiOperation({
+    summary: 'Perform authentication recovery',
+    description: 'Manually trigger authentication recovery process. Useful when authentication files are missing or corrupted.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Recovery process completed',
+    example: {
+      success: true,
+      totalSessions: 3,
+      s3Restored: 2,
+      qrRegenerated: 1,
+      failed: 0,
+      duration: '5.2 seconds',
+      results: [
+        {
+          sessionId: 'user_123',
+          recoveryMethod: 'S3_RESTORED',
+          success: true
+        }
+      ]
+    }
+  })
+  async performAuthRecovery() {
+    try {
+      return await this.webjsService.performManualAuthRecovery();
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Authentication recovery failed',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('sessions/:sessionId/force-initialize')
+  @ApiOperation({
+    summary: 'Force initialize a stuck session',
+    description: 'Forcefully initialize a session that is stuck in INITIALIZING state. This will reset the session and restart the initialization process.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID to force initialize',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Session force initialization completed',
+    example: {
+      success: true,
+      message: 'Session force initialized successfully',
+      session_id: 'user_123456789',
+      previous_status: 'INITIALIZING',
+      new_status: 'QR_READY',
+      qr_code: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51...'
+    }
+  })
+  async forceInitializeSession(@Param('sessionId') sessionId: string) {
+    try {
+      return await this.webjsService.forceInitializeSession(sessionId);
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to force initialize session',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('sessions/:sessionId/smart-recovery')
+  @ApiOperation({
+    summary: 'Smart session recovery',
+    description: 'Performs intelligent session recovery based on comprehensive diagnostics. Automatically determines the best recovery method (S3 restore, memory restore, or force recovery) based on session state analysis.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID to recover',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Smart recovery completed',
+    example: {
+      success: true,
+      method: 'S3_RESTORE',
+      message: 'Session restored from S3 storage',
+      session_id: 'user_123456789',
+      status: 'QR_READY',
+      requires_qr_scan: true,
+      diagnostics_summary: {
+        issues: ['Local auth folder missing'],
+        recommendations: ['Restore session from S3 storage'],
+        syncStatus: 'PARTIAL_SYNC'
+      }
+    }
+  })
+  async smartRecoverySession(@Param('sessionId') sessionId: string) {
+    try {
+      return await this.webjsService.smartRecoverySession(sessionId);
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Smart recovery failed',
+        HttpStatus.BAD_REQUEST,
       );
     }
   }
