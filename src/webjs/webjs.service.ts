@@ -386,16 +386,22 @@ export class WebjsService implements OnModuleDestroy {
         // Try RemoteAuth first, fallback to LocalAuth if needed
         let authStrategy;
         try {
-            // Temporarily use LocalAuth for testing (more reliable than RemoteAuth)
+            // Use RemoteAuth for production (with optimized settings)
+            authStrategy = new RemoteAuth({
+                clientId: sessionId,
+                dataPath: '.wwebjs_auth', // Local fallback path
+                store: this.s3Store,
+                backupSyncIntervalMs: 300000, // 5 minutes (increased from 1 minute)
+            });
+            this.logger.log(`🔧 Using RemoteAuth for session ${sessionId} (production mode)`);
+        } catch (remoteAuthError) {
+            this.logger.warn(`⚠️ RemoteAuth failed for session ${sessionId}, falling back to LocalAuth:`, remoteAuthError);
             const { LocalAuth } = require('whatsapp-web.js');
             authStrategy = new LocalAuth({
                 clientId: sessionId,
                 dataPath: '.wwebjs_auth',
             });
-            this.logger.log(`🔧 Using LocalAuth for session ${sessionId} (testing mode)`);
-        } catch (authError) {
-            this.logger.error(`❌ LocalAuth failed for session ${sessionId}:`, authError);
-            throw authError;
+            this.logger.log(`🔧 Using LocalAuth fallback for session ${sessionId}`);
         }
 
         const client = new Client({
@@ -479,20 +485,30 @@ export class WebjsService implements OnModuleDestroy {
             // Wait for the session to become ready (extended timeout for RemoteAuth S3 restoration)
             const readyPromise = new Promise<void>((resolve, reject) => {
                 const timeout = setTimeout(() => {
-                    reject(new Error('Session restoration timeout - session did not become ready after 180 seconds'));
-                }, 180000); // Increased to 3 minutes for RemoteAuth S3 restoration
+                    reject(new Error('Session restoration timeout - session did not become ready after 300 seconds'));
+                }, 300000); // Increased to 5 minutes for RemoteAuth S3 restoration
 
-                // Progress logging for restoration with detailed tracking
+                // Progress logging for RemoteAuth restoration with detailed tracking
                 let elapsed = 0;
                 const startTime = Date.now();
-                const progressInterval = setInterval(() => {
+                const progressInterval = setInterval(async () => {
                     elapsed += 30;
                     const currentTime = Date.now();
                     const actualElapsed = Math.round((currentTime - startTime) / 1000);
-                    this.logger.log(`⏱️ Restoration progress: ${elapsed}s target / ${actualElapsed}s actual elapsed for session ${sessionId}`);
+                    this.logger.log(`⏱️ RemoteAuth restoration progress: ${elapsed}s target / ${actualElapsed}s actual elapsed for session ${sessionId}`);
                     this.logger.log(`   🔍 Current client status: ${clientInstance.status || 'UNKNOWN'}`);
                     this.logger.log(`   🔍 Auth received: ${authReceived}, Ready received: ${readyReceived}`);
-                    if (elapsed >= 180) {
+                    // Check S3 session existence and size asynchronously
+                    this.s3Store.checkSessionExists(sessionId).then(exists => {
+                        this.logger.log(`   📦 S3 session exists: ${exists}`);
+                        if (exists) {
+                            // Log that large S3 files take longer to download
+                            this.logger.log(`   📥 RemoteAuth downloading S3 session data (large files may take 2-5 minutes)`);
+                        }
+                    }).catch(() => {
+                        this.logger.log(`   📦 S3 session exists: false (error checking)`);
+                    });
+                    if (elapsed >= 300) { // Updated for 5-minute timeout
                         clearInterval(progressInterval);
                     }
                 }, 30000);
@@ -500,18 +516,58 @@ export class WebjsService implements OnModuleDestroy {
                 let authReceived = false;
                 let readyReceived = false;
 
-                // Listen for remote session loaded event (specific to RemoteAuth)
+                // Enhanced RemoteAuth event handling with download monitoring
                 client.on('remote_session_saved', () => {
-                    this.logger.log(`📦 Remote session saved for ${sessionId}`);
+                    this.logger.log(`📦 Remote session saved to S3 for ${sessionId}`);
                 });
 
-                // Add more detailed RemoteAuth event logging
+                // Monitor WhatsApp Web loading (includes S3 download)
                 client.on('loading_screen', (percent, message) => {
-                    this.logger.log(`📱 Restoration loading: ${percent}% - ${message} for session ${sessionId}`);
+                    this.logger.log(`📱 RemoteAuth loading: ${percent}% - ${message} for session ${sessionId}`);
+                    if (message.includes('Loading') || message.includes('Downloading')) {
+                        this.logger.log(`📥 S3 download in progress for session ${sessionId}`);
+                    }
                 });
 
                 client.on('change_state', (state) => {
-                    this.logger.log(`📱 Restoration state: ${state} for session ${sessionId}`);
+                    this.logger.log(`📱 RemoteAuth state change: ${state} for session ${sessionId}`);
+                    if (state === 'OPENING') {
+                        this.logger.log(`🔄 RemoteAuth opening browser for session ${sessionId}`);
+                    } else if (state === 'PAIRING') {
+                        this.logger.log(`🔗 RemoteAuth pairing with S3 data for session ${sessionId}`);
+                    }
+                });
+
+                // Add specific RemoteAuth restoration events
+                client.on('auth_failure', (message) => {
+                    this.logger.error(`❌ RemoteAuth failure during restoration: ${message} for session ${sessionId}`);
+                });
+
+                client.on('disconnected', (reason) => {
+                    this.logger.warn(`🔌 RemoteAuth disconnected during restoration: ${reason} for session ${sessionId}`);
+                });
+
+                // Monitor QR events (shouldn't happen during restoration)
+                client.on('qr', async () => {
+                    this.logger.error(`🚨 QR event during RemoteAuth restoration - S3 session data is corrupted for session ${sessionId}`);
+                    this.logger.log(`🗑️ Cleaning up corrupted S3 session data for ${sessionId}`);
+
+                    // Clean up corrupted S3 session
+                    try {
+                        await this.s3Store.delete({ session: sessionId });
+                        this.logger.log(`✅ Deleted corrupted S3 session data for ${sessionId}`);
+                    } catch (error) {
+                        this.logger.error(`❌ Failed to delete corrupted S3 data:`, error);
+                    }
+
+                    // Mark session as corrupted
+                    await this.safeUpdateSession(sessionId, {
+                        status: WhatsAppSessionStatus.DISCONNECTED,
+                        is_ready: false,
+                        is_authenticated: false,
+                        last_error: 'S3 session data corrupted - cleaned up and requires re-authentication',
+                        last_error_time: new Date(),
+                    });
                 });
 
                 client.on('authenticated', () => {
