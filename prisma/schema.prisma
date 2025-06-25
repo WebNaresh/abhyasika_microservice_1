@@ -14,55 +14,59 @@ enum Gender {
 }
 
 model User {
-  id                       String              @id @default(uuid())
+  id                       String                 @id @default(uuid())
   first_name               String
   last_name                String
-  middle_name              String?             @default("")
-  phone_no                 String              @unique
-  email                    String              @unique
-  description              String?             @default("")
-  tag_line                 String?             @default("UPSC Aspirant")
-  adhar_no                 String?             @unique
+  middle_name              String?                @default("")
+  phone_no                 String                 @unique
+  email                    String                 @unique
+  description              String?                @default("")
+  tag_line                 String?                @default("UPSC Aspirant")
+  adhar_no                 String?                @unique
   gender                   Gender
-  role                     Role                @default(Student)
-  preparing_for            String?             @default("UPSC")
-  address                  String?             @default("")
-  user_location_id         String?             @unique
-  location                 AddressLocation?    @relation(fields: [user_location_id], references: [id])
-  joiningDate              DateTime            @default(now())
-  user_image               String?             @default("")
+  role                     Role                   @default(Student)
+  preparing_for            String?                @default("UPSC")
+  address                  String?                @default("")
+  user_location_id         String?                @unique
+  location                 AddressLocation?       @relation(fields: [user_location_id], references: [id])
+  joiningDate              DateTime               @default(now())
+  user_image               String?                @default("")
   degree                   String[]
-  created_at               DateTime            @default(now())
-  updated_at               DateTime            @updatedAt
-  library_created          Library?            @relation(name: "creator")
+  created_at               DateTime               @default(now())
+  updated_at               DateTime               @updatedAt
+  library_created          Library?               @relation(name: "creator")
   branch_id                String?
-  branch                   Branch?             @relation(fields: [branch_id], references: [id])
-  whatsapp_no              String?             @unique
-  emergency_contact        String              @default("")
+  branch                   Branch?                @relation(fields: [branch_id], references: [id])
+  whatsapp_no              String?                @unique
+  emergency_contact        String                 @default("")
   birth_date               DateTime?
   desk                     DeskNode?
   library_id               String?
-  library_in               Library?            @relation(fields: [library_id], references: [id], name: "student_library", onDelete: SetNull)
-  library_sub_admin        Library?            @relation(name: "subAdmin", fields: [libraryId], references: [id])
+  library_in               Library?               @relation(fields: [library_id], references: [id], name: "student_library", onDelete: SetNull)
+  library_sub_admin        Library?               @relation(name: "subAdmin", fields: [libraryId], references: [id])
   libraryId                String?
   plan_id                  String?
   student_authority_person String?
-  student_authority        User?               @relation(fields: [student_authority_person], references: [id], name: "authority_person")
-  student_plan             UserCurrentPlan[]   @relation(name: "user_current_plan")
-  interested_library       Library[]           @relation(name: "interested_library")
-  interested_room          Room[]              @relation(name: "interested_room")
-  interested_branch        Branch[]            @relation(name: "interested_branch")
-  authorityFor             User[]              @relation("authority_person")
-  user_notification        Notification[]      @relation(name: "notification_user")
-  recipient_notitication   Notification[]      @relation(name: "reciepient_user")
+  student_authority        User?                  @relation(fields: [student_authority_person], references: [id], name: "authority_person")
+  student_plan             UserCurrentPlan[]      @relation(name: "user_current_plan")
+  interested_library       Library[]              @relation(name: "interested_library")
+  interested_room          Room[]                 @relation(name: "interested_room")
+  interested_branch        Branch[]               @relation(name: "interested_branch")
+  authorityFor             User[]                 @relation("authority_person")
+  user_notification        Notification[]         @relation(name: "notification_user")
+  recipient_notitication   Notification[]         @relation(name: "reciepient_user")
   interested_list          InterestedModel[]
   NextMonthConfirm         NextMonthConfirm[]
   StudentResponse          StudentResponse[]
-  AdminPageLog             AdminPageLog[]
   firebase_token           String[]
   password                 String?
   seat_change_requests     SeatChangeRequest[]
   reviews                  Review[]
+  sub_admin_rooms_relation SubAdminRoomsRelation?
+  referrals_made           ReferralModel[]        @relation(name: "referrer")
+  referred_by              ReferralModel?         @relation(name: "referred_user", fields: [referralModelId], references: [id])
+  referralModelId          String?
+  whatsapp_sessions        WhatsAppSession[]
 
   @@index([id])
   @@index([email])
@@ -239,34 +243,37 @@ model Branch {
 }
 
 model Room {
-  id                         String                @id @default(cuid())
+  id                         String                 @id @default(cuid())
   room_name                  String
   branchId                   String
-  student_message_on_joining String                @default("Welcome to the Library")
+  student_message_on_joining String                 @default("Welcome to the Library")
   seat_prefix                String?
-  created_at                 DateTime              @default(now())
-  updatedAt                  DateTime              @updatedAt
+  created_at                 DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
   room_images                LibraryImages[]
-  desk_matrix_id             String?               @unique
-  whatsapp_group_link        String                @default("")
-  upi_id                     String                @default("")
+  desk_matrix_id             String?                @unique
+  whatsapp_group_link        String                 @default("")
+  upi_id                     String                 @default("")
   updated_Desk               DeskMatrix?
-  branch                     Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  interested_student         User[]                @relation(name: "interested_room")
-  library                    Library               @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  branch                     Branch                 @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  interested_student         User[]                 @relation(name: "interested_room")
+  library                    Library                @relation(fields: [libraryId], references: [id], onDelete: Cascade)
   libraryId                  String
   DeskNode                   DeskNode[]
   UserCurrentPlan            UserCurrentPlan[]
   interested_list            InterestedModel[]
   NextMonthConfirm           NextMonthConfirm[]
-  LibraryPlans               LibraryPlans?         @relation(fields: [libraryPlansId], references: [id])
+  LibraryPlans               LibraryPlans?          @relation(fields: [libraryPlansId], references: [id])
   libraryPlansId             String?
-  ReceiptPaymentQRCode       ReceiptPaymentQRCode? @relation(fields: [receiptPaymentQRCodeId], references: [id])
+  ReceiptPaymentQRCode       ReceiptPaymentQRCode?  @relation(fields: [receiptPaymentQRCodeId], references: [id])
   receiptPaymentQRCodeId     String?
   seat_change_requests       SeatChangeRequest[]
+  sub_admin_rooms_relation   SubAdminRoomsRelation? @relation(fields: [subAdminRoomsRelationId], references: [id])
+  subAdminRoomsRelationId    String?
 
   @@index([id])
   @@index([libraryId])
+  @@index([subAdminRoomsRelationId])
 }
 
 model LibraryAchiever {
@@ -378,6 +385,7 @@ enum PlanUnits {
 model AppPlan {
   id               String   @id @default(cuid())
   plan_type        PlanType @default(Freemium)
+  isOnTrial        Boolean  @default(false)
   plan_price       Int
   plan_start_date  DateTime @default(now())
   plan_expiry_date DateTime
@@ -631,22 +639,6 @@ enum BillingType {
   SmsBilling
 }
 
-model AdminPageLog {
-  id         String    @id @default(cuid())
-  admin_id   String
-  admin      User      @relation(fields: [admin_id], references: [id])
-  page_name  String
-  page_url   String
-  start_time DateTime  @default(now())
-  end_time   DateTime?
-  duration   Int? // Duration in seconds
-  created_at DateTime  @default(now())
-  updated_at DateTime  @updatedAt
-
-  @@index([admin_id])
-  @@index([page_name])
-}
-
 model AlertTemplate {
   id                     String   @id @default(cuid())
   library_id             String   @unique
@@ -789,4 +781,52 @@ model Review {
   @@unique([user_id, library_id])
   @@index([user_id])
   @@index([library_id])
+}
+
+model SubAdminRoomsRelation {
+  id           String   @id @default(cuid())
+  sub_admin_id String   @unique
+  sub_admin    User     @relation(fields: [sub_admin_id], references: [id])
+  room         Room[]
+  created_at   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ReferralModel {
+  id            String   @id @default(cuid())
+  referrer_id   String
+  referrer      User     @relation(fields: [referrer_id], references: [id], name: "referrer")
+  referred_user User[]   @relation(name: "referred_user")
+  created_at    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model WhatsAppSession {
+  id               String                @id @default(cuid())
+  user_id          String
+  user             User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  session_id       String                @unique
+  session_name     String?
+  phone_number     String?
+  is_authenticated Boolean               @default(false)
+  is_ready         Boolean               @default(false)
+  qr_code          String?
+  status           WhatsAppSessionStatus @default(INITIALIZING)
+  s3_session_key   String? // S3 key for session data
+  last_activity    DateTime?
+  created_at       DateTime              @default(now())
+  updated_at       DateTime              @updatedAt
+
+  @@index([user_id])
+  @@index([session_id])
+  @@index([status])
+}
+
+enum WhatsAppSessionStatus {
+  INITIALIZING
+  QR_READY
+  AUTHENTICATED
+  READY
+  DISCONNECTED
+  DESTROYED
 }
