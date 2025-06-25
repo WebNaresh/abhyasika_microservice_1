@@ -165,9 +165,19 @@ Creates a new WhatsApp session for a user. Only one session per user allowed.
 
 **POST** `/webjs/sessions/{sessionId}/initialize`
 
-Starts the WhatsApp client and generates QR code.
+Starts the WhatsApp client and generates QR code. The response will either include the QR code immediately or you'll need to call the `/qr` endpoint.
 
-**Response (200):**
+**Response (200) - QR Code Ready:**
+
+```json
+{
+  "session_id": "user_123456789",
+  "qr_code": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51...",
+  "status": "QR_READY"
+}
+```
+
+**Response (200) - Still Initializing:**
 
 ```json
 {
@@ -181,7 +191,7 @@ Starts the WhatsApp client and generates QR code.
 
 **GET** `/webjs/sessions/{sessionId}/qr`
 
-Retrieves the QR code for WhatsApp authentication.
+Retrieves the QR code for WhatsApp authentication. If the QR code is not ready yet, this endpoint will wait up to 30 seconds for it to be generated.
 
 **Response (200):**
 
@@ -644,7 +654,49 @@ async function robustMessageSending(
 
 ### Common Issues and Solutions
 
-#### Issue 1: QR Code Not Generating
+#### Issue 1: Chromium/Browser Not Found
+
+**Symptoms:**
+
+- Error: "Could not find expected browser (chrome) locally"
+- Session fails to initialize
+
+**Solutions:**
+
+1. Install Chromium for Puppeteer:
+   ```bash
+   npx puppeteer browsers install chrome
+   ```
+2. Or set custom browser path:
+   ```env
+   PUPPETEER_EXECUTABLE_PATH=/path/to/chrome
+   ```
+3. Test the setup:
+   ```bash
+   node src/webjs/test-whatsapp.js
+   ```
+
+#### Issue 2: User Already Has Active Session
+
+**Symptoms:**
+
+- Error: "User already has an active WhatsApp session"
+- Cannot create new session
+
+**Solutions:**
+
+1. **Automatic (Recommended)**: The system now automatically deletes old sessions when creating new ones
+2. **Manual**: Delete user's sessions first:
+
+   ```bash
+   # Delete all sessions for a user
+   curl -X DELETE http://localhost:3000/webjs/users/{userId}/sessions
+
+   # Or delete specific session
+   curl -X DELETE http://localhost:3000/webjs/sessions/{sessionId}
+   ```
+
+#### Issue 3: QR Code Not Generating
 
 **Symptoms:**
 
@@ -660,7 +712,7 @@ async function robustMessageSending(
    curl -X POST http://localhost:3000/webjs/sessions/{sessionId}/restart
    ```
 
-#### Issue 2: Authentication Timeout
+#### Issue 4: Authentication Timeout
 
 **Symptoms:**
 
@@ -773,7 +825,7 @@ Add this to your controller for monitoring:
 @ApiOperation({ summary: 'Health check for WhatsApp service' })
 async healthCheck() {
   const activeSessions = this.webjsService.getActiveSessions();
-  const totalSessions = await this.databaseService.whatsAppSession.count();
+  const totalSessions = await this.webjsService.getTotalSessionsCount();
 
   return {
     status: 'healthy',
@@ -786,7 +838,40 @@ async healthCheck() {
 }
 ```
 
-## 🗄️ Database Schema
+**Note**: The health check endpoint is now available at `GET /webjs/health` and includes improved error handling and database session counting.
+
+## � Recent Fixes & Improvements
+
+### Database Error Handling (P2025 Fix)
+
+The service now includes robust error handling for database operations:
+
+- **Safe Update Operations**: All database updates use `safeUpdateSession()` method that gracefully handles missing records
+- **Orphaned Client Cleanup**: Automatic cleanup of in-memory client instances when database records are deleted
+- **Periodic Maintenance**: Background task runs every 5 minutes to clean up orphaned clients
+- **Event Handler Protection**: All WhatsApp event handlers now handle database record deletion gracefully
+
+### Auto-Session Management
+
+- **Automatic Cleanup**: When creating a new session, existing sessions are automatically deleted
+- **Bulk Deletion**: New endpoint `DELETE /webjs/users/{userId}/sessions` for cleaning up all user sessions
+- **Consistent State**: In-memory client instances and database records are kept in sync
+
+### S3 Session Storage Fix
+
+- **Custom S3 Store**: Replaced problematic `wwebjs-aws-s3` package with custom AWS SDK v3 compatible store
+- **AWS SDK v3 Support**: Full compatibility with latest AWS SDK v3 (`@aws-sdk/client-s3`)
+- **Connection Testing**: Built-in S3 connection testing and health monitoring
+- **Session Persistence**: Reliable session storage and retrieval from AWS S3
+- **Error Handling**: Comprehensive error handling for S3 operations
+
+### Error Recovery
+
+- **Circuit Breaker Pattern**: Prevents cascading failures when database operations fail
+- **Graceful Degradation**: Service continues to function even when some database operations fail
+- **Comprehensive Logging**: Detailed logging for troubleshooting and monitoring
+
+## �🗄️ Database Schema
 
 ### WhatsAppSession Model
 

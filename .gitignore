@@ -49,3 +49,55 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 # report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# WhatsApp Web Session Files
+.wwebjs_auth/
+.wwebjs_cache/
+wwebjs_auth/
+wwebjs_cache/
+*.session
+session_*
+
+# WhatsApp Web Browser Data
+.wwebjs_auth/**/*
+.wwebjs_cache/**/*
+
+# QR Code Images (if saved locally)
+qr_codes/
+*.qr.png
+*.qr.jpg
+
+# Session Backups
+session_backups/
+*.session.backup
+
+# Puppeteer Cache
+.cache/
+puppeteer/
+
+# Chrome/Chromium User Data
+chrome_user_data/
+chromium_user_data/
+
+# AWS Credentials (additional safety)
+.aws/
+aws-credentials.json
+
+# Database Files (if using SQLite locally)
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary Files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# Log Files (WhatsApp specific)
+whatsapp_*.log
+webjs_*.log
+
+# Debug Files
+debug/
+*.debug

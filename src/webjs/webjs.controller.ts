@@ -85,7 +85,7 @@ export class WebjsController {
   @Post('sessions/:sessionId/initialize')
   @ApiOperation({
     summary: 'Initialize WhatsApp client',
-    description: 'Initializes the WhatsApp Web client for a session. This will generate a QR code for authentication.'
+    description: 'Initializes the WhatsApp Web client for a session. This will generate a QR code for authentication. The response may include the QR code immediately, or you may need to call the /qr endpoint if the QR code is empty.'
   })
   @ApiParam({
     name: 'sessionId',
@@ -174,7 +174,7 @@ export class WebjsController {
   @Get('sessions/:sessionId/qr')
   @ApiOperation({
     summary: 'Get QR code for authentication',
-    description: 'Retrieves the QR code that needs to be scanned with WhatsApp mobile app for authentication.'
+    description: 'Retrieves the QR code that needs to be scanned with WhatsApp mobile app for authentication. If the QR code is not ready yet, this endpoint will wait up to 30 seconds for it to be generated.'
   })
   @ApiParam({
     name: 'sessionId',
@@ -354,6 +354,44 @@ export class WebjsController {
     }
   }
 
+  @Delete('users/:userId/sessions')
+  @ApiOperation({
+    summary: 'Delete all user sessions',
+    description: 'Permanently deletes all WhatsApp sessions for a user and cleans up all associated resources.'
+  })
+  @ApiParam({
+    name: 'userId',
+    description: 'User ID',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'All user sessions deleted successfully',
+    example: {
+      message: 'All sessions deleted successfully for user user_123456789'
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Failed to delete sessions',
+    example: {
+      statusCode: 400,
+      message: 'Failed to delete user sessions',
+      error: 'Bad Request'
+    }
+  })
+  async deleteAllUserSessions(@Param('userId') userId: string) {
+    try {
+      await this.webjsService.deleteAllUserSessions(userId);
+      return { message: `All sessions deleted successfully for user ${userId}` };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to delete user sessions',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Get('users/:userId/sessions')
   @ApiOperation({
     summary: 'Get all user sessions',
@@ -505,6 +543,121 @@ export class WebjsController {
     } catch (error) {
       throw new HttpException(
         'Failed to check session status',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('sessions/:sessionId/debug')
+  @ApiOperation({
+    summary: 'Debug session state',
+    description: 'Returns detailed debug information about a session including database state and client state.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID (same as user ID)',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Debug information retrieved successfully',
+    example: {
+      session_id: 'user_123456789',
+      database_status: 'READY',
+      client_initialized: true,
+      client_ready: true,
+      client_authenticated: true,
+      phone_number: '919876543210',
+      last_activity: '2024-01-15T11:45:00Z'
+    }
+  })
+  async debugSession(@Param('sessionId') sessionId: string) {
+    try {
+      return await this.webjsService.getSessionDebugInfo(sessionId);
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to get debug information',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('sessions/:sessionId/restore')
+  @ApiOperation({
+    summary: 'Restore session from database',
+    description: 'Manually restore a session that exists in database but is not active in memory. Useful after server restarts.'
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session ID to restore',
+    example: 'user_123456789'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Session restored successfully',
+    example: {
+      success: true,
+      message: 'Session restored successfully',
+      session_id: 'user_123456789',
+      status: 'READY'
+    }
+  })
+  async restoreSession(@Param('sessionId') sessionId: string) {
+    try {
+      const result = await this.webjsService.restoreSession(sessionId);
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to restore session',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('health')
+  @ApiOperation({
+    summary: 'Health check for WhatsApp service',
+    description: 'Returns the health status of the WhatsApp service including active sessions and memory usage.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Health check completed successfully',
+    example: {
+      status: 'healthy',
+      timestamp: '2024-01-15T12:00:00Z',
+      active_sessions: 5,
+      total_sessions: 10,
+      s3_connection: true,
+      network_connectivity: true,
+      memory_usage: {
+        rss: 123456789,
+        heapTotal: 87654321,
+        heapUsed: 65432109,
+        external: 12345678
+      },
+      uptime: 3600
+    }
+  })
+  async healthCheck() {
+    try {
+      const activeSessions = this.webjsService.getActiveSessions();
+      const totalSessions = await this.webjsService.getTotalSessionsCount();
+      const s3Status = await this.webjsService.testS3Connection();
+      const networkStatus = await this.webjsService.testNetworkConnectivity();
+
+      return {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        active_sessions: activeSessions.length,
+        total_sessions: totalSessions,
+        s3_connection: s3Status,
+        network_connectivity: networkStatus,
+        memory_usage: process.memoryUsage(),
+        uptime: process.uptime()
+      };
+    } catch (error) {
+      throw new HttpException(
+        'Health check failed',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

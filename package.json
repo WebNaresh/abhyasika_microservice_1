@@ -54,11 +54,11 @@
     "ip": "^2.0.1",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.14",
+    "puppeteer": "^24.10.2",
     "razorpay": "^2.9.4",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
-    "whatsapp-web.js": "^1.30.0",
-    "wwebjs-aws-s3": "^1.0.2"
+    "whatsapp-web.js": "^1.30.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
