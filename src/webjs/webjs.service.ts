@@ -762,6 +762,17 @@ export class WebjsService implements OnModuleDestroy {
             });
 
             this.logger.log(`✅ Successfully updated session ${sessionId} status to: ${data.status || 'unchanged'}`);
+
+            // Also update in-memory client status if it exists to keep them in sync
+            const clientInstance = this.clients.get(sessionId);
+            if (clientInstance && data.status) {
+                clientInstance.status = data.status;
+                if (data.is_ready !== undefined) clientInstance.isReady = data.is_ready;
+                if (data.is_authenticated !== undefined) clientInstance.isAuthenticated = data.is_authenticated;
+                if (data.phone_number !== undefined) clientInstance.phoneNumber = data.phone_number;
+                this.logger.log(`🔄 In-memory client status synced for session ${sessionId}: ${data.status}`);
+            }
+
             return true;
         } catch (error) {
             if (error.code === 'P2025') {
@@ -1043,7 +1054,11 @@ export class WebjsService implements OnModuleDestroy {
         }
 
         // Enhanced status check: verify session consistency across database, memory, and S3
+        // This ensures frontend always gets the most current status
         const enhancedStatus = await this.validateAndSyncSession(sessionId, session);
+
+        // Log status for debugging frontend issues
+        this.logger.log(`📊 Status API called for session ${sessionId}: ${enhancedStatus.status} (Ready: ${enhancedStatus.is_ready}, Auth: ${enhancedStatus.is_authenticated})`);
 
         return this.mapSessionToDto(enhancedStatus);
     }
@@ -1112,15 +1127,23 @@ export class WebjsService implements OnModuleDestroy {
                 const qrExpired = qrAge > 20000; // 20 seconds
 
                 if (qrExpired) {
-                    this.logger.warn(`⏰ QR code for session ${sessionId} has expired, marking for reinitialize`);
+                    this.logger.warn(`⏰ QR code for session ${sessionId} has expired (${Math.round(qrAge / 1000)}s old), marking as DISCONNECTED`);
                     const updatedSession = await this.safeUpdateSession(sessionId, {
-                        status: WhatsAppSessionStatus.INITIALIZING,
+                        status: WhatsAppSessionStatus.DISCONNECTED,
                         qr_code: null,
                         is_ready: false,
                         is_authenticated: false,
+                        last_error: 'QR code expired - user did not scan within time limit',
+                        last_error_time: new Date(),
                     });
 
                     return updatedSession || session;
+                }
+
+                // QR is still valid but client is missing - this can happen when user reloads page
+                // Check if QR is getting stale (older than 10 seconds but not expired)
+                if (qrAge > 10000) {
+                    this.logger.warn(`⚠️ QR code for session ${sessionId} is getting stale (${Math.round(qrAge / 1000)}s old), user may have reloaded page`);
                 }
             }
 
@@ -1187,8 +1210,33 @@ export class WebjsService implements OnModuleDestroy {
             throw new Error('Session not found');
         }
 
-        // If QR code is available, return it immediately
+        // If QR code is available and status is QR_READY, check if it's still valid
         if (session.qr_code && session.status === WhatsAppSessionStatus.QR_READY) {
+            // Check if QR code is expired (WhatsApp QR codes expire after ~20 seconds)
+            const qrAge = Date.now() - new Date(session.updated_at).getTime();
+            const qrExpired = qrAge > 20000; // 20 seconds
+
+            if (qrExpired) {
+                this.logger.warn(`⏰ QR code for session ${sessionId} has expired (${Math.round(qrAge / 1000)}s old), generating new one...`);
+
+                // Mark session for reinitialization and generate new QR code
+                await this.safeUpdateSession(sessionId, {
+                    status: WhatsAppSessionStatus.INITIALIZING,
+                    qr_code: null,
+                    is_ready: false,
+                    is_authenticated: false,
+                });
+
+                // Generate new QR code
+                try {
+                    return await this.initializeClient(sessionId);
+                } catch (error) {
+                    this.logger.error(`Failed to generate new QR code for session ${sessionId}:`, error);
+                    throw new Error(`Failed to generate new QR code. Please try again or reinitialize the session.`);
+                }
+            }
+
+            // QR code is still valid, return it
             return {
                 session_id: sessionId,
                 qr_code: session.qr_code,

@@ -50,8 +50,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const sessionId = parts[1];
       const message = parts.slice(2).join(':');
       return {
-        message: `📱 WhatsApp Session Expired\n\n${message}\n\n🔄 To reconnect:\n1. Get QR Code: GET /webjs/sessions/${sessionId}/qr\n2. Scan the QR code with your WhatsApp mobile app\n3. Wait for authentication to complete\n\n💡 If QR code is not available, reinitialize: POST /webjs/sessions/${sessionId}/initialize`,
-        statusCode: HttpStatus.BAD_REQUEST
+        message: `📱 WhatsApp QR Code Expired\n\n${message}\n\n🔄 To get a new QR code:\n1. Get fresh QR Code: GET /webjs/sessions/${sessionId}/qr\n2. Scan the new QR code within 20 seconds\n3. Complete the authentication process\n\n💡 QR codes expire quickly for security. If you need more time, get a new one: POST /webjs/sessions/${sessionId}/initialize`,
+        statusCode: HttpStatus.GONE
       };
     }
 
