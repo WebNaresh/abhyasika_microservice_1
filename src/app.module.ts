@@ -17,6 +17,7 @@ import { JwtTokenModule } from './utils/jwt_token/jwt_token.module';
 import { RazorPayClientModule } from './utils/razor_pay_client/razor_pay_client.module';
 import { S3Module } from './utils/s3/s3.module';
 import { WhatsappModule } from './utils/whatsapp/whatsapp.module';
+import { WebjsModule } from './webjs/webjs.module';
 
 
 @Module({
@@ -47,7 +48,8 @@ import { WhatsappModule } from './utils/whatsapp/whatsapp.module';
     FirebaseAdminModule,
     FirebasePushNotificationModule,
     MessageModule,
-    CronModule
+    CronModule,
+    WebjsModule
   ],
   controllers: [AppController],
   providers: [AppService],

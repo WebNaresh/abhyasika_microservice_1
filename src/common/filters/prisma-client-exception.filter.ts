@@ -15,6 +15,75 @@ import { TokenExpiredError } from 'jsonwebtoken';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  // Helper method to check if error is WhatsApp-related
+  private isWhatsAppError(errorMessage: string): boolean {
+    return errorMessage.includes('WHATSAPP_') ||
+      errorMessage.includes('Client is not ready for session') ||
+      errorMessage.includes('Current status: QR_READY');
+  }
+
+  // Helper method to format WhatsApp error messages for user-friendly responses
+  private formatWhatsAppError(errorMessage: string): { message: string; statusCode: number } {
+    if (!errorMessage) {
+      return { message: 'An unknown WhatsApp error occurred', statusCode: HttpStatus.INTERNAL_SERVER_ERROR };
+    }
+
+    // Handle the specific technical error message for QR_READY status
+    if (errorMessage.includes('Client is not ready for session') && errorMessage.includes('Current status: QR_READY')) {
+      return {
+        message: 'Your WhatsApp session has expired. Please reconnect by scanning the QR code.',
+        statusCode: HttpStatus.BAD_REQUEST
+      };
+    }
+
+    // Parse structured error messages
+    if (errorMessage.includes('WHATSAPP_QR_EXPIRED:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `📱 WhatsApp Session Expired\n\n${message}\n\n🔄 To reconnect:\n1. Get QR Code: GET /webjs/sessions/${sessionId}/qr\n2. Scan the QR code with your WhatsApp mobile app\n3. Wait for authentication to complete\n\n💡 If QR code is not available, reinitialize: POST /webjs/sessions/${sessionId}/initialize`,
+        statusCode: HttpStatus.BAD_REQUEST
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_QR_REQUIRED:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `🔗 WhatsApp Device Linking Required\n\n${message}\n\n📱 Steps to link your device:\n1. Open WhatsApp on your phone\n2. Go to Settings → Linked Devices\n3. Tap "Link a Device"\n4. Scan the QR code\n\n🔍 Get QR Code: GET /webjs/sessions/${sessionId}/qr`,
+        statusCode: HttpStatus.PRECONDITION_REQUIRED
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_DISCONNECTED:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `📱 WhatsApp Disconnected\n\n${message}\n\n🔄 To reconnect:\n1. Initialize a new session: POST /webjs/sessions/${sessionId}/initialize\n2. Scan the new QR code with your phone\n3. Wait for connection to be established`,
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE
+      };
+    }
+
+    if (errorMessage.includes('WHATSAPP_QR_MISSING:')) {
+      const parts = errorMessage.split(':');
+      const sessionId = parts[1];
+      const message = parts.slice(2).join(':');
+      return {
+        message: `🔄 WhatsApp Reconnection Needed\n\n${message}\n\n🚀 To reconnect:\n1. Reinitialize: POST /webjs/sessions/${sessionId}/initialize\n2. Scan the new QR code\n3. Complete the linking process`,
+        statusCode: HttpStatus.GONE
+      };
+    }
+
+    // Default WhatsApp error handling
+    return {
+      message: errorMessage,
+      statusCode: HttpStatus.BAD_REQUEST
+    };
+  }
+
   catch(exception: any, host: ArgumentsHost) {
     console.log(
       `🚀 ~ file: exception.filter.ts:13 ~ AllExceptionsFilter ~ exception:`,
@@ -86,7 +155,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (exception instanceof BadRequestException) {
         console.log('i am here1');
         exception = exception as BadRequestException;
-        message = exception.response.message.join(', ');
+        message = Array.isArray(exception.response.message)
+          ? exception.response.message.join(', ')
+          : exception.response.message;
         console.log(`🚀 ~ file: prisma-client-exception.filter.ts:85 ~ AllExceptionsFilter ~ message:`, message)
         status = exception.getStatus
           ? exception.getStatus()
@@ -101,10 +172,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
       console.log('i am here', (exception.getResponse() as any).message);
       if (exception.message) {
-        message = exception.message;
-        status = exception.getStatus
-          ? exception.getStatus()
-          : HttpStatus.INTERNAL_SERVER_ERROR;
+        // Handle WhatsApp-specific errors with user-friendly messages
+        if (this.isWhatsAppError(exception.message)) {
+          const whatsappError = this.formatWhatsAppError(exception.message);
+          message = whatsappError.message;
+          status = whatsappError.statusCode;
+        } else {
+          message = exception.message;
+          status = exception.getStatus
+            ? exception.getStatus()
+            : HttpStatus.INTERNAL_SERVER_ERROR;
+        }
       } else if (Array.isArray((exception.getResponse() as any).message)) {
         message = (exception.getResponse() as any).message.join(', ');
       } else {
