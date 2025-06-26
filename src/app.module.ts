@@ -1,7 +1,8 @@
 import { BullModule } from '@nestjs/bullmq';
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ModuleRef } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { FirebasePushNotificationModule } from './firebase_push_notification/firebase_push_notification.module';
@@ -54,4 +55,30 @@ import { WebjsModule } from './webjs/webjs.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule { }
+export class AppModule implements OnModuleInit {
+  constructor(private readonly moduleRef: ModuleRef) { }
+
+  async onModuleInit() {
+    // Set up cross-injection between services to avoid circular dependency
+    try {
+      const { WebjsService } = await import('./webjs/webjs.service');
+      const { WhatsappService } = await import('./utils/whatsapp/whatsapp.service');
+
+      // Get service instances from DI container
+      const webjsInstance = this.moduleRef.get(WebjsService, { strict: false });
+      const whatsappInstance = this.moduleRef.get(WhatsappService, { strict: false });
+
+      console.log(`🔧 WebJS Service instance found: ${!!webjsInstance}`);
+      console.log(`🔧 WhatsApp Service instance found: ${!!whatsappInstance}`);
+
+      if (webjsInstance && whatsappInstance) {
+        webjsInstance.setWhatsappService(whatsappInstance);
+        console.log('✅ Cross-injection between WebJS and WhatsApp services established');
+      } else {
+        console.error('❌ One or both services not found for cross-injection');
+      }
+    } catch (error) {
+      console.error('❌ Failed to set up cross-injection:', error);
+    }
+  }
+}

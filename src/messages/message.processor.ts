@@ -295,6 +295,13 @@ export class DuePaymentReminderNotificationProcessor extends WorkerHost {
             const send_whatsapp: DuePaymentReminderDto = job.data.content;
             console.log(job.data, "In a due payment reminder");
 
+            // Validate required fields before sending
+            if (!send_whatsapp.receiver_mobile_number || send_whatsapp.receiver_mobile_number === 'null') {
+                console.error(`❌ DuePaymentReminderNotificationProcessor: Missing or invalid receiver_mobile_number for job ${job.id}:`, send_whatsapp.receiver_mobile_number);
+                console.error('Job data:', JSON.stringify(job.data, null, 2));
+                return; // Skip this job as it has invalid data
+            }
+
             if (process.env.ENV !== 'development') {
                 await this.whatsapp.send_payment_reminder(send_whatsapp).catch((error) => {
                     console.log(`🚀 ~ DuePaymentReminderNotificationProcessor ~ error:`, error)

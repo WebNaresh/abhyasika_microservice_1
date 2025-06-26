@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Client, RemoteAuth, MessageMedia } from 'whatsapp-web.js';
 import { WhatsAppSessionStatus } from '@prisma/client';
 import { DatabaseService } from '../utils/database/database.service';
@@ -13,13 +13,14 @@ import { AuthRecoveryService } from './services/auth-recovery.service';
 import { SessionDiagnosticsService } from './services/session-diagnostics.service';
 
 @Injectable()
-export class WebjsService implements OnModuleDestroy {
+export class WebjsService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(WebjsService.name);
     private clients: Map<string, WhatsAppClientInstance> = new Map();
     private s3Store: CustomS3Store;
     private authRecoveryService: AuthRecoveryService;
     private sessionDiagnosticsService: SessionDiagnosticsService;
     private activeTimers: Map<string, { progressInterval?: NodeJS.Timeout; timeoutHandle?: NodeJS.Timeout }> = new Map();
+    private whatsappService: any; // Will be injected dynamically to avoid circular dependency
 
     constructor(
         private readonly databaseService: DatabaseService,
@@ -32,6 +33,21 @@ export class WebjsService implements OnModuleDestroy {
         this.performStartupRecovery().catch((error: any) => {
             this.logger.error('Failed to perform startup recovery:', error);
         });
+    }
+
+    async onModuleInit() {
+        // Module initialization - cross-injection will be handled in app module
+        this.logger.log('WebJS Service initialized');
+    }
+
+    // Method to set WhatsApp service (called from app module to avoid circular dependency)
+    setWhatsappService(whatsappService: any) {
+        this.whatsappService = whatsappService;
+        // Also set this service in the WhatsApp service
+        if (whatsappService && whatsappService.setWebjsService) {
+            whatsappService.setWebjsService(this);
+            this.logger.log('Cross-injection with WhatsApp service established');
+        }
     }
 
     async onModuleDestroy() {
@@ -1518,8 +1534,24 @@ export class WebjsService implements OnModuleDestroy {
         }
 
         try {
-            // Format phone number (ensure it includes country code)
-            const formattedNumber = to.includes('@c.us') ? to : `${to}@c.us`;
+            // Format phone number for WhatsApp Web.js
+            let formattedNumber: string;
+
+            if (to.includes('@c.us')) {
+                formattedNumber = to;
+            } else {
+                // Clean the number: remove all non-digits, then add @c.us
+                const cleanNumber = to.replace(/\D/g, '');
+
+                // Validate the number length (should be at least 10 digits)
+                if (cleanNumber.length < 10) {
+                    throw new Error(`Invalid phone number format: ${to}. Must be at least 10 digits.`);
+                }
+
+                formattedNumber = `${cleanNumber}@c.us`;
+            }
+
+            this.logger.log(`📱 Formatted number for WhatsApp Web: ${formattedNumber} (original: ${to})`);
 
             let messageId: string;
 
@@ -1527,15 +1559,33 @@ export class WebjsService implements OnModuleDestroy {
                 // Send media message (for now, just send the first media URL)
                 // In a production environment, you might want to handle multiple media files
                 const mediaUrl = media_urls[0];
+                this.logger.log(`📤 Sending media message to ${formattedNumber} with URL: ${mediaUrl}`);
                 const media = await MessageMedia.fromUrl(mediaUrl);
                 const response = await clientInstance.client.sendMessage(formattedNumber, media, {
                     caption: message,
                 });
-                messageId = response.id.id;
+
+                this.logger.log(`📨 Media message response:`, JSON.stringify(response, null, 2));
+
+                if (response && response.id && response.id.id) {
+                    messageId = response.id.id;
+                } else {
+                    this.logger.warn(`⚠️ Unexpected media response format:`, response);
+                    messageId = response?.id?.toString() || 'unknown';
+                }
             } else {
                 // Send text message
+                this.logger.log(`📤 Sending text message to ${formattedNumber}`);
                 const response = await clientInstance.client.sendMessage(formattedNumber, message);
-                messageId = response.id.id;
+
+                this.logger.log(`📨 Message response:`, JSON.stringify(response, null, 2));
+
+                if (response && response.id && response.id.id) {
+                    messageId = response.id.id;
+                } else {
+                    this.logger.warn(`⚠️ Unexpected response format:`, response);
+                    messageId = response?.id?.toString() || 'unknown';
+                }
             }
 
             // Update last activity

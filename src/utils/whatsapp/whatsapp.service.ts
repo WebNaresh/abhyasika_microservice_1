@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import { BillingService } from '../billing/billing.service';
+import { DatabaseService } from '../database/database.service';
 import { AbhyasikaPendingPaymentDto } from './dto/abhyasika_pending_payment.dto';
 import { AdmissionAdminDto } from './dto/admission-admin.dto';
 import { AdmissionDto } from './dto/admission.dto';
@@ -18,11 +19,177 @@ import { WhatsappBodyDto } from './dto/whatsapp_body.dto';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
-  constructor(private readonly billing_service: BillingService) { }
+  private webjsService: any; // Will be injected dynamically to avoid circular dependency
+
+  constructor(
+    private readonly billing_service: BillingService,
+    private readonly databaseService: DatabaseService
+  ) { }
 
   // Initialize the WhatsappBodyDto with billing service
   onModuleInit() {
     WhatsappBodyDto.setBillingService(this.billing_service);
+  }
+
+  // Method to set WebJS service (called from WebJS module to avoid circular dependency)
+  setWebjsService(webjsService: any) {
+    this.webjsService = webjsService;
+  }
+
+  // Check if library has an active WhatsApp Web session
+  private async checkForWhatsAppWebSession(library_url: string): Promise<any> {
+    try {
+      // Step 1: Get library by URL
+      const library = await this.databaseService.library.findUnique({
+        where: { library_url },
+        include: { creator: true }
+      });
+
+      if (!library || !library.creatorId) {
+        console.log(`❌ Library not found or no creator for URL: ${library_url}`);
+        return null;
+      }
+
+      console.log(`🔍 Found library: ${library.name}, creator: ${library.creator?.first_name} ${library.creator?.last_name}`);
+
+      // Step 2: Check for active WhatsApp Web session for the creator
+      const whatsappSession = await this.databaseService.whatsAppSession.findFirst({
+        where: {
+          user_id: library.creatorId,
+          status: 'READY', // Only consider READY sessions
+          is_ready: true,
+          is_authenticated: true
+        },
+        orderBy: { last_activity: 'desc' }
+      });
+
+      if (whatsappSession) {
+        console.log(`✅ Found active WhatsApp Web session: ${whatsappSession.session_id} for creator: ${library.creatorId}`);
+        return whatsappSession;
+      }
+
+      console.log(`❌ No active WhatsApp Web session found for creator: ${library.creatorId}`);
+      return null;
+    } catch (error) {
+      console.error(`❌ Error checking WhatsApp Web session for library ${library_url}:`, error);
+      return null;
+    }
+  }
+
+  // Send message via WhatsApp Web
+  private async sendViaWhatsAppWeb(sessionId: string, props: DuePaymentReminderDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      console.log(`📱 Formatted phone number for WhatsApp Web: ${phoneNumber} (original: ${props.receiver_mobile_number})`);
+
+      // Create message content in the exact format requested with bold formatting
+      const messageContent = `*Payment Reminder for ${props.library_name}*
+
+Dear *${props.student_name}*,
+
+We hope you are doing well. This is a friendly reminder that your payment for *${props.library_name}* is still due.
+
+To avoid any service interruptions or late fees, please complete your payment at your earliest convenience. You can make the payment using the email associated with your account, *${props.student_email}*.
+
+If you have already made the payment, kindly disregard this message. Should you have any questions or require assistance, feel free to reach out.
+
+Thank you for your prompt attention to this matter.
+
+Best regards,
+*${props.library_name}*
+‪*+91${props.library_contact}*`;
+
+      console.log(`📝 Message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Payment reminder sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
+  // Send general payment reminder message via WhatsApp Web
+  private async sendGeneralPaymentReminderViaWhatsAppWeb(sessionId: string, props: DuePaymentReminderDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      console.log(`📱 Formatted phone number for WhatsApp Web: ${phoneNumber} (original: ${props.receiver_mobile_number})`);
+
+      // Create message content in the exact format requested with bold formatting
+      const messageContent = `*Payment Reminder for ${props.library_name}*
+
+Dear *${props.student_name}*,
+
+We hope you are doing well. This is a friendly reminder that your payment for *${props.library_name}* is still due.
+
+To avoid any service interruptions or late fees, please complete your payment at your earliest convenience. You can make the payment using the email associated with your account, *${props.student_email}*.
+
+If you have already made the payment, kindly disregard this message. Should you have any questions or require assistance, feel free to reach out.
+
+Thank you for your prompt attention to this matter.
+
+Best regards,
+*${props.library_name}*
+‪*+91${props.library_contact}*`;
+
+      console.log(`📝 General payment reminder message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ General payment reminder sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send general payment reminder via WhatsApp Web:`, error);
+      throw error;
+    }
   }
 
   // Simple function to log and throw errors for axios requests
@@ -41,9 +208,99 @@ export class WhatsappService implements OnModuleInit {
     return text.length > limit ? text.slice(0, limit) : text;
   };
   async send_payment_reminder(props: DuePaymentReminderDto) {
-
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      throw new HttpException(
+        `Invalid receiver mobile number: ${props.receiver_mobile_number}. Cannot send WhatsApp message.`,
+        HttpStatus.BAD_REQUEST
+      );
+    }
 
     try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web message completed successfully`);
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending via API method...`);
+      const whatsapp_body = new WhatsappBodyDto(
+        "abhyasika_payment_reminder",
+        props.receiver_mobile_number,
+        props.library_url
+      ).addHeaderComponent([{
+        type: "text",
+        text: props.library_name
+      }]).addBodyComponent([{
+        type: "text",
+        text: props.student_name,
+      }, {
+        type: "text",
+        text: props.library_name
+      }, {
+        type: "text",
+        text: props.student_email
+      }, {
+        type: "text",
+        text: props.library_contact
+      }]).addButtonComponent("0", "url", [{
+        type: 'text',
+        text: `library_redirect_method/${props.library_url}`
+      }])
+
+      return await whatsapp_body.sendMessage(this.billing_service);
+    } catch (error) {
+      this.handleAxiosError(error);
+    }
+  }
+
+  async send_general_payment_reminder(props: DuePaymentReminderDto) {
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      throw new HttpException(
+        `Invalid receiver mobile number: ${props.receiver_mobile_number}. Cannot send WhatsApp message.`,
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendGeneralPaymentReminderViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web message completed successfully`);
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending via API method...`);
       const whatsapp_body = new WhatsappBodyDto(
         "abhyasika_payment_reminder",
         props.receiver_mobile_number,

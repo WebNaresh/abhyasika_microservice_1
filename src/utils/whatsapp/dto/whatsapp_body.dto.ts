@@ -25,9 +25,20 @@ export class WhatsappBodyDto {
     private domain: string;
 
     constructor(templateName: string, receiverNumber: string, domain: string) {
+        // Validate receiver number
+        if (!receiverNumber || receiverNumber === 'null' || receiverNumber.trim() === '') {
+            throw new Error(`Invalid receiver number: ${receiverNumber}. Cannot create WhatsApp message.`);
+        }
+
+        // Clean the receiver number (remove any non-digits)
+        const cleanNumber = receiverNumber.replace(/\D/g, '');
+        if (cleanNumber.length < 10) {
+            throw new Error(`Invalid receiver number format: ${receiverNumber}. Must be at least 10 digits.`);
+        }
+
         this.body = {
             messaging_product: 'whatsapp',
-            to: `91${receiverNumber}`,
+            to: `91${cleanNumber}`,
             type: 'template',
             template: {
                 name: templateName,
