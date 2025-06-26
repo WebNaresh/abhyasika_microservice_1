@@ -36,6 +36,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
       };
     }
 
+    // Handle the specific technical error message for INITIALIZING status
+    if (errorMessage.includes('Client is not ready for session') && errorMessage.includes('Current status: INITIALIZING')) {
+      return {
+        message: 'Please wait for some time, we are recovering your session.',
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE
+      };
+    }
+
     // Parse structured error messages
     if (errorMessage.includes('WHATSAPP_QR_EXPIRED:')) {
       const parts = errorMessage.split(':');

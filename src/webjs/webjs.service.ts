@@ -116,7 +116,6 @@ export class WebjsService implements OnModuleDestroy {
                 // After recovery, restore sessions that were successfully recovered
                 await this.restoreRecoveredSessions(recoveryReport);
             }
-
         } catch (error) {
             this.logger.error('❌ Startup recovery failed:', error);
             // Fallback to normal session restoration
