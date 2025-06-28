@@ -1,16 +1,16 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Client, RemoteAuth, MessageMedia } from 'whatsapp-web.js';
 import { WhatsAppSessionStatus } from '@prisma/client';
+import { Client, MessageMedia, RemoteAuth } from 'whatsapp-web.js';
 import { DatabaseService } from '../utils/database/database.service';
 import { S3Service } from '../utils/s3/s3.service';
+import { BulkMessageResult, SendBulkMessageDto, SendBulkMessageResponseDto } from './dto/bulk-message.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
-import { SessionStatusDto, QRCodeResponseDto, SessionListDto } from './dto/session-status.dto';
 import { SendMessageDto, SendMessageResponseDto } from './dto/send-message.dto';
-import { SendBulkMessageDto, SendBulkMessageResponseDto, BulkMessageResult } from './dto/bulk-message.dto';
-import { WhatsAppClientInstance, SessionEventHandlers } from './interfaces/whatsapp-client.interface';
-import { CustomS3Store } from './stores/custom-s3-store';
+import { QRCodeResponseDto, SessionListDto, SessionStatusDto } from './dto/session-status.dto';
+import { WhatsAppClientInstance } from './interfaces/whatsapp-client.interface';
 import { AuthRecoveryService } from './services/auth-recovery.service';
 import { SessionDiagnosticsService } from './services/session-diagnostics.service';
+import { CustomS3Store } from './stores/custom-s3-store';
 
 @Injectable()
 export class WebjsService implements OnModuleDestroy, OnModuleInit {
@@ -19,7 +19,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
     private s3Store: CustomS3Store;
     private authRecoveryService: AuthRecoveryService;
     private sessionDiagnosticsService: SessionDiagnosticsService;
-    private activeTimers: Map<string, { progressInterval?: NodeJS.Timeout; timeoutHandle?: NodeJS.Timeout }> = new Map();
+    private activeTimers: Map<string, { progressInterval?: NodeJS.Timeout; timeoutHandle?: NodeJS.Timeout; qrTimeoutHandle?: NodeJS.Timeout }> = new Map();
     private whatsappService: any; // Will be injected dynamically to avoid circular dependency
 
     constructor(
@@ -190,6 +190,10 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 clearTimeout(timers.timeoutHandle);
                 this.logger.log(`🧹 Cleared timeout handle for session ${sessionId}`);
             }
+            if (timers.qrTimeoutHandle) {
+                clearTimeout(timers.qrTimeoutHandle);
+                this.logger.log(`🧹 Cleared QR timeout handle for session ${sessionId}`);
+            }
             this.activeTimers.delete(sessionId);
         }
     }
@@ -198,6 +202,88 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
     private cleanupAllTimers(): void {
         for (const [sessionId] of this.activeTimers) {
             this.cleanupSessionTimers(sessionId);
+        }
+    }
+
+    // Clean up only QR generation timers (progressInterval and timeoutHandle) but preserve QR timeout
+    private cleanupQRGenerationTimers(sessionId: string): void {
+        const timers = this.activeTimers.get(sessionId);
+        if (timers) {
+            if (timers.progressInterval) {
+                clearInterval(timers.progressInterval);
+                timers.progressInterval = undefined;
+                this.logger.log(`🧹 Cleared QR generation progress interval for session ${sessionId}`);
+            }
+            if (timers.timeoutHandle) {
+                clearTimeout(timers.timeoutHandle);
+                timers.timeoutHandle = undefined;
+                this.logger.log(`🧹 Cleared QR generation timeout handle for session ${sessionId}`);
+            }
+
+            // Only delete the entry if no timers remain
+            if (!timers.qrTimeoutHandle) {
+                this.activeTimers.delete(sessionId);
+            }
+        }
+    }
+
+    // Handle QR code timeout - automatically update status from QR_READY to DISCONNECTED
+    private async handleQRTimeout(sessionId: string): Promise<void> {
+        try {
+            this.logger.log(`⏰ QR code timeout triggered for session ${sessionId} - cleaning up expired QR`);
+
+            // Get current session status to verify it's still in QR_READY state
+            const session = await this.databaseService.whatsAppSession.findUnique({
+                where: { session_id: sessionId },
+            });
+
+            if (!session) {
+                this.logger.warn(`⚠️ Session ${sessionId} not found during QR timeout - may have been deleted`);
+                return;
+            }
+
+            // Only proceed if session is still in QR_READY state
+            if (session.status === WhatsAppSessionStatus.QR_READY) {
+                this.logger.log(`🧹 Updating session ${sessionId} from QR_READY to DISCONNECTED due to timeout`);
+
+                // Update session status to DISCONNECTED and clear QR code
+                await this.safeUpdateSession(sessionId, {
+                    status: WhatsAppSessionStatus.DISCONNECTED,
+                    qr_code: null,
+                    is_ready: false,
+                    is_authenticated: false,
+                    last_error: 'QR code expired after 60 seconds without scanning',
+                    last_error_time: new Date(),
+                });
+
+                // Clean up any associated client instance
+                if (this.clients.has(sessionId)) {
+                    const clientInstance = this.clients.get(sessionId);
+                    try {
+                        await clientInstance?.client?.destroy();
+                        this.clients.delete(sessionId);
+                        this.logger.log(`🧹 Cleaned up client instance for expired QR session ${sessionId}`);
+                    } catch (error) {
+                        this.logger.error(`❌ Error cleaning up client for expired QR session ${sessionId}:`, error);
+                    }
+                }
+
+                this.logger.log(`✅ QR timeout handled successfully for session ${sessionId}`);
+            } else {
+                this.logger.log(`ℹ️ Session ${sessionId} status is ${session.status}, no QR timeout action needed`);
+            }
+
+        } catch (error) {
+            this.logger.error(`❌ Error handling QR timeout for session ${sessionId}:`, error);
+        } finally {
+            // Clean up the timeout timer reference
+            const timers = this.activeTimers.get(sessionId);
+            if (timers?.qrTimeoutHandle) {
+                timers.qrTimeoutHandle = undefined;
+                if (!timers.progressInterval && !timers.timeoutHandle) {
+                    this.activeTimers.delete(sessionId);
+                }
+            }
         }
     }
 
@@ -706,8 +792,8 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 })
             ]);
 
-            // Clean up timers when QR code is successfully generated
-            this.cleanupSessionTimers(sessionId);
+            // Clean up QR generation timers when QR code is successfully generated (preserve QR timeout)
+            this.cleanupQRGenerationTimers(sessionId);
             this.logger.log(`✅ QR generation completed successfully for session ${sessionId}`);
 
             this.logger.log(`QR code generated for session ${sessionId}`);
@@ -942,6 +1028,20 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                     return;
                 }
 
+                // Start QR code timeout (60 seconds)
+                this.logger.log(`⏰ Starting 60-second QR timeout for session ${sessionId}`);
+                const qrTimeoutHandle = setTimeout(async () => {
+                    this.logger.log(`⏰ QR timeout reached for session ${sessionId}`);
+                    await this.handleQRTimeout(sessionId);
+                }, 60000); // 60 seconds = 60,000 milliseconds
+
+                // Store the QR timeout handle
+                const existingTimers = this.activeTimers.get(sessionId) || {};
+                this.activeTimers.set(sessionId, {
+                    ...existingTimers,
+                    qrTimeoutHandle,
+                });
+
                 // Resolve the promise with the QR code
                 if (!qrResolved) {
                     qrResolved = true;
@@ -956,6 +1056,15 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             // Handle initialization errors
             client.on('auth_failure', (message) => {
                 this.logger.error(`❌ Auth failure during QR setup for session ${sessionId}: ${message}`);
+
+                // Clear QR timeout on auth failure
+                const timers = this.activeTimers.get(sessionId);
+                if (timers?.qrTimeoutHandle) {
+                    clearTimeout(timers.qrTimeoutHandle);
+                    timers.qrTimeoutHandle = undefined;
+                    this.logger.log(`🧹 Cleared QR timeout due to auth failure for session ${sessionId}`);
+                }
+
                 if (!qrResolved) {
                     qrResolved = true;
                     reject(new Error(`Authentication setup failed: ${message}`));
@@ -965,6 +1074,15 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             // Handle disconnection during QR generation
             client.on('disconnected', (reason) => {
                 this.logger.error(`❌ Client disconnected during QR generation for session ${sessionId}: ${reason}`);
+
+                // Clear QR timeout on disconnection
+                const timers = this.activeTimers.get(sessionId);
+                if (timers?.qrTimeoutHandle) {
+                    clearTimeout(timers.qrTimeoutHandle);
+                    timers.qrTimeoutHandle = undefined;
+                    this.logger.log(`🧹 Cleared QR timeout due to disconnection for session ${sessionId}`);
+                }
+
                 if (!qrResolved) {
                     qrResolved = true;
                     reject(new Error(`Client disconnected during QR generation: ${reason}`));
@@ -980,6 +1098,14 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             this.logger.log(`🔐 Client authenticated for session ${sessionId} - progression: QR_READY → AUTHENTICATED`);
             clientInstance.isAuthenticated = true;
             clientInstance.status = WhatsAppSessionStatus.AUTHENTICATED;
+
+            // Clear QR timeout since authentication was successful
+            const timers = this.activeTimers.get(sessionId);
+            if (timers?.qrTimeoutHandle) {
+                clearTimeout(timers.qrTimeoutHandle);
+                timers.qrTimeoutHandle = undefined;
+                this.logger.log(`🧹 Cleared QR timeout for authenticated session ${sessionId}`);
+            }
 
             const updated = await this.safeUpdateSession(sessionId, {
                 is_authenticated: true,
