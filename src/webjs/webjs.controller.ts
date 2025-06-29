@@ -911,7 +911,7 @@ export class WebjsController {
         authMethod: 'LocalAuth',
         hasAuthData: true
       },
-      localAuth: {
+      localAuthFolder: {
         folderExists: true,
         sessionFolderExists: false,
         files: []
