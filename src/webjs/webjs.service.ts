@@ -1,34 +1,23 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { WhatsAppSessionStatus } from '@prisma/client';
-import { Client, MessageMedia, RemoteAuth } from 'whatsapp-web.js';
+import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import { DatabaseService } from '../utils/database/database.service';
-import { S3Service } from '../utils/s3/s3.service';
 import { BulkMessageResult, SendBulkMessageDto, SendBulkMessageResponseDto } from './dto/bulk-message.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { SendMessageDto, SendMessageResponseDto } from './dto/send-message.dto';
 import { QRCodeResponseDto, SessionListDto, SessionStatusDto } from './dto/session-status.dto';
 import { WhatsAppClientInstance } from './interfaces/whatsapp-client.interface';
-import { AuthRecoveryService } from './services/auth-recovery.service';
-import { SessionDiagnosticsService } from './services/session-diagnostics.service';
-import { CustomS3Store } from './stores/custom-s3-store';
 
 @Injectable()
 export class WebjsService implements OnModuleDestroy, OnModuleInit {
     private readonly logger = new Logger(WebjsService.name);
     private clients: Map<string, WhatsAppClientInstance> = new Map();
-    private s3Store: CustomS3Store;
-    private authRecoveryService: AuthRecoveryService;
-    private sessionDiagnosticsService: SessionDiagnosticsService;
     private activeTimers: Map<string, { progressInterval?: NodeJS.Timeout; timeoutHandle?: NodeJS.Timeout; qrTimeoutHandle?: NodeJS.Timeout }> = new Map();
     private whatsappService: any; // Will be injected dynamically to avoid circular dependency
 
     constructor(
         private readonly databaseService: DatabaseService,
-        private readonly s3Service: S3Service,
     ) {
-        this.initializeS3Store().catch(error => {
-            this.logger.error('Failed to initialize S3 store:', error);
-        });
         this.startPeriodicCleanup();
         this.performStartupRecovery().catch((error: any) => {
             this.logger.error('Failed to perform startup recovery:', error);
@@ -68,115 +57,19 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         this.clients.clear();
     }
 
-    private async initializeS3Store() {
-        this.s3Store = new CustomS3Store({
-            bucketName: process.env.AWS_BUCKET_NAME,
-            remoteDataPath: 'whatsapp-sessions/',
-            s3Client: {
-                region: process.env.AWS_S3_REGION,
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-                },
-            },
-        });
 
-        // Initialize AuthRecoveryService after S3Store is ready
-        this.authRecoveryService = new AuthRecoveryService(this.databaseService, this.s3Store);
 
-        // Initialize SessionDiagnosticsService
-        this.sessionDiagnosticsService = new SessionDiagnosticsService(this.databaseService, this.s3Store);
-
-        // Test S3 connection on initialization
-        try {
-            const connectionTest = await this.s3Store.testConnection();
-            if (connectionTest) {
-                this.logger.log('✅ S3 Store initialized and tested successfully for WhatsApp sessions');
-            } else {
-                this.logger.error('❌ S3 Store connection test failed');
-            }
-        } catch (error) {
-            this.logger.error('❌ S3 Store initialization failed:', error);
-        }
-    }
-
-    // Perform comprehensive startup recovery
+    // Perform simple startup recovery with LocalAuth
     private async performStartupRecovery(): Promise<void> {
         try {
-            this.logger.log('🚀 Starting comprehensive authentication recovery...');
-
-            // Wait for S3Store to be initialized
-            let retries = 0;
-            while (!this.authRecoveryService && retries < 10) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                retries++;
-            }
-
-            if (!this.authRecoveryService) {
-                this.logger.error('❌ AuthRecoveryService not initialized, skipping recovery');
-                return;
-            }
-
-            // Check authentication folder integrity
-            const authFolderOk = await this.authRecoveryService.checkAuthFolderIntegrity();
-
-            if (authFolderOk) {
-                this.logger.log('✅ Authentication folder is intact, proceeding with normal session restoration');
-                await this.restoreActiveSessions();
-            } else {
-                this.logger.warn('🚨 Authentication folder missing or corrupted, performing recovery...');
-
-                // Perform authentication recovery
-                const recoveryReport = await this.authRecoveryService.performAuthRecovery();
-
-                // After recovery, restore sessions that were successfully recovered
-                await this.restoreRecoveredSessions(recoveryReport);
-            }
+            this.logger.log('🚀 Starting local session restoration...');
+            await this.restoreActiveSessions();
         } catch (error) {
             this.logger.error('❌ Startup recovery failed:', error);
-            // Fallback to normal session restoration
-            try {
-                await this.restoreActiveSessions();
-            } catch (fallbackError) {
-                this.logger.error('❌ Fallback session restoration also failed:', fallbackError);
-            }
         }
     }
 
-    // Restore sessions after recovery process
-    private async restoreRecoveredSessions(recoveryReport: any): Promise<void> {
-        try {
-            this.logger.log('🔄 Restoring recovered sessions...');
 
-            for (const result of recoveryReport.results) {
-                if (result.success && result.recoveryMethod === 'S3_RESTORED') {
-                    try {
-                        this.logger.log(`🔄 Initializing recovered session: ${result.sessionId}`);
-                        await this.initializeClient(result.sessionId, true); // Pass isRestoration = true
-                        await new Promise(resolve => setTimeout(resolve, 2000)); // Delay between initializations
-                    } catch (error) {
-                        this.logger.error(`❌ Failed to initialize recovered session ${result.sessionId}:`, error);
-
-                        // Update session status to reflect initialization failure
-                        await this.safeUpdateSession(result.sessionId, {
-                            status: WhatsAppSessionStatus.DISCONNECTED,
-                            is_ready: false,
-                            is_authenticated: false,
-                            last_error: error.message || 'Session initialization failed during recovery',
-                            last_error_time: new Date(),
-                        });
-                    }
-                } else if (result.success && result.recoveryMethod === 'QR_REGENERATED') {
-                    this.logger.log(`📱 Session ${result.sessionId} marked for QR regeneration - will initialize on first access`);
-                }
-            }
-
-            this.logger.log(`✅ Recovery restoration completed. Active clients: ${this.clients.size}`);
-
-        } catch (error) {
-            this.logger.error('❌ Error restoring recovered sessions:', error);
-        }
-    }
 
     // Clean up all timers for a specific session
     private cleanupSessionTimers(sessionId: string): void {
@@ -292,13 +185,8 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         this.logger.log(`🔍 Performing pre-initialization checks for session ${sessionId}...`);
 
         try {
-            // Check S3 connectivity
-            const s3Connected = await this.s3Store.testConnection();
-            if (!s3Connected) {
-                this.logger.warn(`⚠️ S3 connection test failed for session ${sessionId}`);
-            } else {
-                this.logger.log(`✅ S3 connectivity check passed for session ${sessionId}`);
-            }
+            // Pre-initialization checks for LocalAuth
+            this.logger.log(`✅ LocalAuth pre-initialization checks passed for session ${sessionId}`);
 
             // Check system memory (basic check)
             const memUsage = process.memoryUsage();
@@ -374,7 +262,6 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
 
         // Use user_id as session_id since one user = one session
         const sessionId = user_id;
-        const s3SessionKey = `whatsapp-sessions/${sessionId}`;
 
         // Create session record in database
         const session = await this.databaseService.whatsAppSession.create({
@@ -383,7 +270,6 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 session_id: sessionId,
                 session_name: `WhatsApp for ${user.first_name} ${user.last_name}`,
                 status: WhatsAppSessionStatus.INITIALIZING,
-                s3_session_key: s3SessionKey,
             },
         });
 
@@ -483,27 +369,12 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             }
         }
 
-        // Create WhatsApp client with optimized RemoteAuth
-        // Try RemoteAuth first, fallback to LocalAuth if needed
-        let authStrategy;
-        try {
-            // Use RemoteAuth for production (with optimized settings)
-            authStrategy = new RemoteAuth({
-                clientId: sessionId,
-                dataPath: '.wwebjs_auth', // Local fallback path
-                store: this.s3Store,
-                backupSyncIntervalMs: 300000, // 5 minutes (increased from 1 minute)
-            });
-            this.logger.log(`🔧 Using RemoteAuth for session ${sessionId} (production mode)`);
-        } catch (remoteAuthError) {
-            this.logger.warn(`⚠️ RemoteAuth failed for session ${sessionId}, falling back to LocalAuth:`, remoteAuthError);
-            const { LocalAuth } = require('whatsapp-web.js');
-            authStrategy = new LocalAuth({
-                clientId: sessionId,
-                dataPath: '.wwebjs_auth',
-            });
-            this.logger.log(`🔧 Using LocalAuth fallback for session ${sessionId}`);
-        }
+        // Create WhatsApp client with LocalAuth
+        const authStrategy = new LocalAuth({
+            clientId: sessionId,
+            dataPath: '.wwebjs_auth',
+        });
+        this.logger.log(`🔧 Using LocalAuth for session ${sessionId}`);
 
         const client = new Client({
             authStrategy,
@@ -599,16 +470,8 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                     this.logger.log(`⏱️ RemoteAuth restoration progress: ${elapsed}s target / ${actualElapsed}s actual elapsed for session ${sessionId}`);
                     this.logger.log(`   🔍 Current client status: ${clientInstance.status || 'UNKNOWN'}`);
                     this.logger.log(`   🔍 Auth received: ${authReceived}, Ready received: ${readyReceived}`);
-                    // Check S3 session existence and size asynchronously
-                    this.s3Store.checkSessionExists(sessionId).then(exists => {
-                        this.logger.log(`   📦 S3 session exists: ${exists}`);
-                        if (exists) {
-                            // Log that large S3 files take longer to download
-                            this.logger.log(`   📥 RemoteAuth downloading S3 session data (large files may take 2-5 minutes)`);
-                        }
-                    }).catch(() => {
-                        this.logger.log(`   📦 S3 session exists: false (error checking)`);
-                    });
+                    // LocalAuth restoration progress
+                    this.logger.log(`   📦 LocalAuth restoration in progress for session ${sessionId}`);
                     if (elapsed >= 300) { // Updated for 5-minute timeout
                         clearInterval(progressInterval);
                     }
@@ -648,25 +511,16 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                     this.logger.warn(`🔌 RemoteAuth disconnected during restoration: ${reason} for session ${sessionId}`);
                 });
 
-                // Monitor QR events (shouldn't happen during restoration)
+                // Monitor QR events (shouldn't happen during LocalAuth restoration)
                 client.on('qr', async () => {
-                    this.logger.error(`🚨 QR event during RemoteAuth restoration - S3 session data is corrupted for session ${sessionId}`);
-                    this.logger.log(`🗑️ Cleaning up corrupted S3 session data for ${sessionId}`);
+                    this.logger.error(`🚨 QR event during LocalAuth restoration - local session data may be corrupted for session ${sessionId}`);
 
-                    // Clean up corrupted S3 session
-                    try {
-                        await this.s3Store.delete({ session: sessionId });
-                        this.logger.log(`✅ Deleted corrupted S3 session data for ${sessionId}`);
-                    } catch (error) {
-                        this.logger.error(`❌ Failed to delete corrupted S3 data:`, error);
-                    }
-
-                    // Mark session as corrupted
+                    // Mark session as needing re-authentication
                     await this.safeUpdateSession(sessionId, {
                         status: WhatsAppSessionStatus.DISCONNECTED,
                         is_ready: false,
                         is_authenticated: false,
-                        last_error: 'S3 session data corrupted - cleaned up and requires re-authentication',
+                        last_error: 'Local session data corrupted - requires re-authentication',
                         last_error_time: new Date(),
                     });
                 });
@@ -717,15 +571,6 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 };
             } catch (error) {
                 this.logger.error(`❌ Session restoration failed for ${sessionId}:`, error);
-
-                // Check if session exists in S3 before marking as disconnected
-                const sessionExistsInS3 = await this.s3Store.checkSessionExists(sessionId).catch(() => false);
-
-                if (!sessionExistsInS3) {
-                    this.logger.warn(`🚨 Session ${sessionId} not found in S3, marking as DISCONNECTED`);
-                } else {
-                    this.logger.warn(`🚨 Session ${sessionId} restoration failed despite S3 data existing - session may be corrupted`);
-                }
 
                 // Mark session as DISCONNECTED instead of falling back to QR
                 await this.safeUpdateSession(sessionId, {
@@ -1175,11 +1020,6 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 this.logger.warn(`Could not update ready status for session ${sessionId} - session may have been deleted`);
                 // Clean up the client instance
                 await this.cleanupOrphanedClient(sessionId, client);
-            } else {
-                // Force immediate backup to S3 after session becomes ready
-                this.forceBackupSessionToS3(sessionId).catch((error: any) => {
-                    this.logger.error(`Failed to backup session ${sessionId} to S3:`, error);
-                });
             }
         });
 
@@ -1254,37 +1094,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 session.status === WhatsAppSessionStatus.AUTHENTICATED) &&
                 !hasMemoryClient) {
 
-                this.logger.warn(`⚠️ Session ${sessionId} marked as ${session.status} in DB but missing from memory. Attempting restoration...`);
-
-                // Check if session exists in S3
-                const s3Exists = await this.s3Store.checkSessionExists(sessionId);
-
-                if (s3Exists) {
-                    this.logger.log(`📦 Session ${sessionId} found in S3, attempting automatic restoration...`);
-
-                    try {
-                        // Attempt automatic restoration from S3
-                        const recoveryResult = await this.authRecoveryService.recoverSpecificSession(sessionId);
-
-                        if (recoveryResult.success) {
-                            // Initialize the client with restoration flag
-                            await this.initializeClient(sessionId, true);
-
-                            // Get updated session status
-                            const updatedSession = await this.databaseService.whatsAppSession.findUnique({
-                                where: { session_id: sessionId },
-                            });
-
-                            this.logger.log(`✅ Session ${sessionId} automatically restored from S3`);
-                            return updatedSession || session;
-                        }
-                    } catch (restoreError) {
-                        this.logger.error(`❌ Failed to restore session ${sessionId} from S3:`, restoreError);
-                    }
-                }
-
-                // If S3 restoration failed or session not in S3, mark as disconnected
-                this.logger.warn(`🔄 Session ${sessionId} cannot be restored, marking as DISCONNECTED`);
+                this.logger.warn(`⚠️ Session ${sessionId} marked as ${session.status} in DB but missing from memory. Marking as DISCONNECTED...`);
                 const updatedSession = await this.safeUpdateSession(sessionId, {
                     status: WhatsAppSessionStatus.DISCONNECTED,
                     is_ready: false,
@@ -1530,7 +1340,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                     instructions = 'Session is disconnected. Please reinitialize to restore connection.';
                     nextSteps = [
                         'Call POST /webjs/sessions/{sessionId}/initialize to reconnect',
-                        'If session was previously working, it may be restored from S3 automatically'
+                        'If session was previously working, it may be restored from local auth data automatically'
                     ];
                     break;
 
@@ -1552,7 +1362,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 last_activity: validatedSession.last_activity,
                 created_at: validatedSession.created_at,
                 session_validated: true, // Indicates this status went through validation
-                s3_backup_available: await this.s3Store.checkSessionExists(sessionId).catch(() => false),
+                auth_method: 'LocalAuth',
             };
 
         } catch (error) {
@@ -1583,23 +1393,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 this.logger.log(`🔄 Auto-restoring READY/AUTHENTICATED session ${session_id} for message sending...`);
 
                 try {
-                    // Check if session needs recovery first
-                    if (this.authRecoveryService) {
-                        const needsRecovery = await this.authRecoveryService.checkSessionNeedsRecovery(session_id);
-                        if (needsRecovery) {
-                            this.logger.log(`🔧 Session ${session_id} needs authentication recovery...`);
-                            const recoveryResult = await this.authRecoveryService.recoverSpecificSession(session_id);
-
-                            if (!recoveryResult.success) {
-                                throw new Error(`Recovery failed: ${recoveryResult.error}`);
-                            }
-
-                            if (recoveryResult.requiresQRScan) {
-                                throw new Error(`Session ${session_id} requires QR code scanning after recovery. Please scan the QR code with your WhatsApp mobile app. Get QR code: GET /webjs/sessions/${session_id}/qr`);
-                            }
-                        }
-                    }
-
+                    // Try to initialize the client with LocalAuth
                     await this.initializeClient(session_id);
                     clientInstance = this.clients.get(session_id);
 
@@ -2081,101 +1875,11 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         }
     }
 
-    // Backup session authentication data to S3 (for RemoteAuth)
-    private async backupSessionToS3(sessionId: string): Promise<void> {
-        try {
-            // With RemoteAuth, session data is automatically stored in S3 by WhatsApp Web.js
-            // We just need to verify the session exists in S3 and log the backup status
 
-            const sessionExists = await this.s3Store.checkSessionExists(sessionId);
 
-            if (sessionExists) {
-                this.logger.log(`📦 Session ${sessionId} is already backed up to S3 via RemoteAuth`);
 
-                // Optional: Create a backup timestamp record
-                const backupMetadata = {
-                    sessionId: sessionId,
-                    backupTime: new Date().toISOString(),
-                    method: 'RemoteAuth',
-                    status: 'success'
-                };
 
-                await this.s3Store.saveSession(`${sessionId}-backup-metadata`, backupMetadata);
-                this.logger.log(`� Backup metadata saved for session ${sessionId}`);
-            } else {
-                this.logger.warn(`⚠️ Session ${sessionId} not found in S3 - RemoteAuth may not have synced yet`);
-            }
-        } catch (error) {
-            this.logger.error(`❌ Failed to verify S3 backup for session ${sessionId}:`, error);
-            // Don't throw error as this is not critical for session functionality
-        }
-    }
 
-    // Force immediate backup to S3 with retry logic
-    private async forceBackupSessionToS3(sessionId: string): Promise<void> {
-        try {
-            this.logger.log(`🔄 Force backing up session ${sessionId} to S3...`);
-
-            // Wait a moment for RemoteAuth to complete its backup
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            // Check if session exists in S3 with retry
-            let attempts = 0;
-            const maxAttempts = 5;
-            let sessionExists = false;
-
-            while (attempts < maxAttempts && !sessionExists) {
-                attempts++;
-                sessionExists = await this.s3Store.checkSessionExists(sessionId);
-
-                if (!sessionExists) {
-                    this.logger.log(`📦 Attempt ${attempts}/${maxAttempts}: Session ${sessionId} not yet in S3, waiting...`);
-                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds between attempts
-                }
-            }
-
-            if (sessionExists) {
-                this.logger.log(`✅ Session ${sessionId} successfully backed up to S3 after ${attempts} attempts`);
-
-                // Update database with backup confirmation
-                await this.safeUpdateSession(sessionId, {
-                    s3_backup_confirmed: true,
-                    last_backup_time: new Date(),
-                });
-            } else {
-                this.logger.error(`❌ Failed to confirm S3 backup for session ${sessionId} after ${maxAttempts} attempts`);
-
-                // Debug: List all files in S3 to see what's actually there
-                this.logger.log(`🔍 Debugging S3 contents for session ${sessionId}...`);
-                try {
-                    const allFiles = await this.s3Store.listAllSessionFiles();
-                    this.logger.log(`📦 All S3 files in whatsapp-sessions/:`, allFiles);
-
-                    const sessionFiles = await this.s3Store.listSessionFiles(sessionId);
-                    this.logger.log(`📦 Files related to session ${sessionId}:`, sessionFiles);
-                } catch (debugError) {
-                    this.logger.error(`❌ Failed to debug S3 contents:`, debugError);
-                }
-            }
-
-        } catch (error) {
-            this.logger.error(`❌ Failed to force backup session ${sessionId} to S3:`, error);
-        }
-    }
-
-    // Test S3 connection
-    async testS3Connection(): Promise<boolean> {
-        try {
-            if (!this.s3Store) {
-                this.logger.warn('S3 store not initialized');
-                return false;
-            }
-            return await this.s3Store.testConnection();
-        } catch (error) {
-            this.logger.error('S3 connection test failed:', error);
-            return false;
-        }
-    }
 
     // Get detailed debug information for a session
     async getSessionDebugInfo(sessionId: string): Promise<any> {
@@ -2213,14 +1917,31 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         }
     }
 
-    // Get comprehensive session diagnostics
+    // Get basic session diagnostics (simplified without S3)
     async getSessionDiagnostics(sessionId: string): Promise<any> {
         try {
-            if (!this.sessionDiagnosticsService) {
-                throw new Error('SessionDiagnosticsService not initialized');
+            const session = await this.databaseService.whatsAppSession.findUnique({
+                where: { session_id: sessionId },
+            });
+
+            if (!session) {
+                throw new Error(`Session ${sessionId} not found`);
             }
 
-            return await this.sessionDiagnosticsService.diagnoseSession(sessionId, this.clients);
+            const clientInstance = this.clients.get(sessionId);
+            const hasActiveClient = !!clientInstance;
+
+            return {
+                session_id: sessionId,
+                database_status: session.status,
+                has_active_client: hasActiveClient,
+                client_ready: clientInstance?.isReady || false,
+                client_authenticated: clientInstance?.isAuthenticated || false,
+                last_activity: session.last_activity,
+                created_at: session.created_at,
+                auth_method: 'LocalAuth',
+                diagnostics_timestamp: new Date().toISOString(),
+            };
         } catch (error) {
             this.logger.error(`Error getting session diagnostics for ${sessionId}:`, error);
             throw error;
@@ -2243,9 +1964,6 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             this.logger.log(`🔧 Using recovery method: ${recoveryMethod} for session ${sessionId}`);
 
             switch (recoveryMethod) {
-                case 'S3_RESTORE':
-                    return await this.performS3Recovery(sessionId, diagnostics);
-
                 case 'MEMORY_RESTORE':
                     return await this.performMemoryRecovery(sessionId, diagnostics);
 
@@ -2259,36 +1977,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         }
     }
 
-    // Perform S3-based recovery
-    private async performS3Recovery(sessionId: string, diagnostics: any): Promise<any> {
-        this.logger.log(`🔄 Performing S3 recovery for session ${sessionId}...`);
 
-        try {
-            // Use auth recovery service to restore from S3
-            const recoveryResult = await this.authRecoveryService.recoverSpecificSession(sessionId);
-
-            if (recoveryResult.success) {
-                // Try to initialize the client with restoration flag
-                const initResult = await this.initializeClient(sessionId, true);
-
-                return {
-                    success: true,
-                    method: 'S3_RESTORE',
-                    message: 'Session restored from S3 storage',
-                    session_id: sessionId,
-                    status: initResult.status,
-                    qr_code: initResult.qr_code,
-                    requires_qr_scan: initResult.status === WhatsAppSessionStatus.QR_READY,
-                    diagnostics_summary: diagnostics.analysis,
-                };
-            } else {
-                throw new Error(`S3 recovery failed: ${recoveryResult.error}`);
-            }
-        } catch (error) {
-            this.logger.error(`S3 recovery failed for ${sessionId}:`, error);
-            throw error;
-        }
-    }
 
     // Perform memory-based recovery
     private async performMemoryRecovery(sessionId: string, diagnostics: any): Promise<any> {
@@ -2532,35 +2221,32 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         }
     }
 
-    // Check authentication folder status
+    // Check authentication folder status (simplified for LocalAuth)
     async checkAuthFolderStatus(): Promise<boolean> {
         try {
-            if (!this.authRecoveryService) {
-                return false;
-            }
-            return await this.authRecoveryService.checkAuthFolderIntegrity();
+            const fs = require('fs');
+            const path = require('path');
+            const authPath = path.join(process.cwd(), '.wwebjs_auth');
+            return fs.existsSync(authPath);
         } catch (error) {
             this.logger.error('Error checking auth folder status:', error);
             return false;
         }
     }
 
-    // Perform manual authentication recovery
+    // Perform manual authentication recovery (simplified for LocalAuth)
     async performManualAuthRecovery(): Promise<any> {
         try {
-            if (!this.authRecoveryService) {
-                throw new Error('AuthRecoveryService not initialized');
-            }
+            this.logger.log('🔧 Starting manual authentication recovery with LocalAuth...');
 
-            this.logger.log('🔧 Starting manual authentication recovery...');
-            const recoveryReport = await this.authRecoveryService.performAuthRecovery();
-
-            // Restore recovered sessions
-            await this.restoreRecoveredSessions(recoveryReport);
+            // Simply restore active sessions with LocalAuth
+            await this.restoreActiveSessions();
 
             return {
                 success: true,
-                ...recoveryReport,
+                method: 'LOCAL_RESTORE',
+                message: 'Sessions restored using LocalAuth',
+                timestamp: new Date().toISOString(),
             };
         } catch (error) {
             this.logger.error('Manual authentication recovery failed:', error);
@@ -2648,18 +2334,18 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 last_activity: null,
             });
 
-            // Remove from S3 if exists (for completely fresh start)
+            // Clean up local auth data for fresh start
             try {
-                if (this.s3Store) {
-                    const sessionExists = await this.s3Store.checkSessionExists(sessionId);
-                    if (sessionExists) {
-                        await this.s3Store.deleteSession(sessionId);
-                        this.logger.log(`🗑️ Cleared S3 session data for ${sessionId}`);
-                    }
+                const fs = require('fs');
+                const path = require('path');
+                const authPath = path.join(process.cwd(), '.wwebjs_auth', sessionId);
+                if (fs.existsSync(authPath)) {
+                    fs.rmSync(authPath, { recursive: true, force: true });
+                    this.logger.log(`🗑️ Cleared local auth data for ${sessionId}`);
                 }
-            } catch (s3Error) {
-                this.logger.warn(`⚠️ Could not clear S3 data for ${sessionId}:`, s3Error.message);
-                // Continue anyway - S3 cleanup is not critical
+            } catch (localError) {
+                this.logger.warn(`⚠️ Could not clear local auth data for ${sessionId}:`, localError.message);
+                // Continue anyway - local cleanup is not critical
             }
 
             // Initialize fresh client

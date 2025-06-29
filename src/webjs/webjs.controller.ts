@@ -887,7 +887,7 @@ export class WebjsController {
   @Get('sessions/:sessionId/diagnostics')
   @ApiOperation({
     summary: 'Comprehensive session diagnostics',
-    description: 'Performs comprehensive analysis of session state including S3 storage, local cache, database, and memory synchronization. Provides detailed recommendations for fixing issues.'
+    description: 'Performs comprehensive analysis of session state including local auth storage, database, and memory synchronization. Provides detailed recommendations for fixing issues.'
   })
   @ApiParam({
     name: 'sessionId',
@@ -906,13 +906,10 @@ export class WebjsController {
         isReady: false,
         isAuthenticated: false
       },
-      s3Storage: {
+      localAuth: {
         exists: true,
-        dataSize: 1024,
-        dataPreview: {
-          hasWAToken1: true,
-          hasWAToken2: true
-        }
+        authMethod: 'LocalAuth',
+        hasAuthData: true
       },
       localAuth: {
         folderExists: true,
@@ -929,7 +926,7 @@ export class WebjsController {
         recommendations: ['Scan QR code with WhatsApp mobile app'],
         syncStatus: 'PARTIAL_SYNC',
         canRecover: true,
-        recoveryMethod: 'S3_RESTORE'
+        recoveryMethod: 'LOCAL_RESTORE'
       }
     }
   })
@@ -989,7 +986,7 @@ export class WebjsController {
       timestamp: '2024-01-15T12:00:00Z',
       active_sessions: 5,
       total_sessions: 10,
-      s3_connection: true,
+      auth_method: 'LocalAuth',
       network_connectivity: true,
       auth_folder_status: true,
       memory_usage: {
@@ -1005,7 +1002,6 @@ export class WebjsController {
     try {
       const activeSessions = this.webjsService.getActiveSessions();
       const totalSessions = await this.webjsService.getTotalSessionsCount();
-      const s3Status = await this.webjsService.testS3Connection();
       const networkStatus = await this.webjsService.testNetworkConnectivity();
       const authFolderStatus = await this.webjsService.checkAuthFolderStatus();
 
@@ -1014,7 +1010,7 @@ export class WebjsController {
         timestamp: new Date().toISOString(),
         active_sessions: activeSessions.length,
         total_sessions: totalSessions,
-        s3_connection: s3Status,
+        auth_method: 'LocalAuth',
         network_connectivity: networkStatus,
         auth_folder_status: authFolderStatus,
         memory_usage: process.memoryUsage(),
@@ -1039,14 +1035,14 @@ export class WebjsController {
     example: {
       success: true,
       totalSessions: 3,
-      s3Restored: 2,
+      localRestored: 2,
       qrRegenerated: 1,
       failed: 0,
       duration: '5.2 seconds',
       results: [
         {
           sessionId: 'user_123',
-          recoveryMethod: 'S3_RESTORED',
+          recoveryMethod: 'LOCAL_RESTORED',
           success: true
         }
       ]
@@ -1099,7 +1095,7 @@ export class WebjsController {
   @Post('sessions/:sessionId/smart-recovery')
   @ApiOperation({
     summary: 'Smart session recovery',
-    description: 'Performs intelligent session recovery based on comprehensive diagnostics. Automatically determines the best recovery method (S3 restore, memory restore, or force recovery) based on session state analysis.'
+    description: 'Performs intelligent session recovery based on comprehensive diagnostics. Automatically determines the best recovery method (local restore, memory restore, or force recovery) based on session state analysis.'
   })
   @ApiParam({
     name: 'sessionId',
@@ -1111,14 +1107,14 @@ export class WebjsController {
     description: 'Smart recovery completed',
     example: {
       success: true,
-      method: 'S3_RESTORE',
-      message: 'Session restored from S3 storage',
+      method: 'LOCAL_RESTORE',
+      message: 'Session restored from local auth storage',
       session_id: 'user_123456789',
       status: 'QR_READY',
       requires_qr_scan: true,
       diagnostics_summary: {
         issues: ['Local auth folder missing'],
-        recommendations: ['Restore session from S3 storage'],
+        recommendations: ['Restore session from local auth storage'],
         syncStatus: 'PARTIAL_SYNC'
       }
     }
