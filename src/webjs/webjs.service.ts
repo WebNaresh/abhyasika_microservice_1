@@ -892,10 +892,21 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
     private async cleanupOrphanedClient(sessionId: string, client: any): Promise<void> {
         try {
             this.logger.log(`Cleaning up orphaned client for session ${sessionId}`);
-            await client.destroy();
+
+            // Add timeout to prevent hanging on client.destroy()
+            const destroyPromise = client.destroy();
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Client destroy timeout')), 10000); // 10 second timeout
+            });
+
+            await Promise.race([destroyPromise, timeoutPromise]);
             this.clients.delete(sessionId);
+            this.logger.log(`✅ Successfully cleaned up orphaned client for session ${sessionId}`);
         } catch (cleanupError) {
-            this.logger.error(`Error cleaning up orphaned client ${sessionId}:`, cleanupError);
+            this.logger.error(`❌ Error cleaning up orphaned client ${sessionId}:`, cleanupError);
+            // Force remove from clients map even if destroy failed
+            this.clients.delete(sessionId);
+            this.logger.log(`🔧 Force removed client ${sessionId} from memory after cleanup failure`);
         }
     }
 
@@ -904,10 +915,22 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
         // Run cleanup every 5 minutes
         setInterval(async () => {
             try {
-                await this.cleanupOrphanedClients();
-                await this.cleanupStuckSessions();
+                this.logger.log('🧹 Starting periodic cleanup...');
+
+                // Add timeout to prevent cleanup from hanging
+                const cleanupPromise = Promise.all([
+                    this.cleanupOrphanedClients(),
+                    this.cleanupStuckSessions()
+                ]);
+
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Cleanup timeout after 60 seconds')), 60000);
+                });
+
+                await Promise.race([cleanupPromise, timeoutPromise]);
+                this.logger.log('✅ Periodic cleanup completed successfully');
             } catch (error) {
-                this.logger.error('Error during periodic cleanup:', error);
+                this.logger.error('❌ Error during periodic cleanup:', error);
             }
         }, 5 * 60 * 1000); // 5 minutes
     }
@@ -915,6 +938,12 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
     // Clean up clients that don't have corresponding database records
     private async cleanupOrphanedClients(): Promise<void> {
         const clientSessionIds = Array.from(this.clients.keys());
+        this.logger.log(`🔍 Checking ${clientSessionIds.length} active clients for orphaned sessions...`);
+
+        if (clientSessionIds.length === 0) {
+            this.logger.log(`ℹ️ No active clients to check for orphaned sessions`);
+            return;
+        }
 
         for (const sessionId of clientSessionIds) {
             try {
@@ -923,16 +952,21 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 });
 
                 if (!session) {
-                    this.logger.log(`Found orphaned client for session ${sessionId}, cleaning up...`);
+                    this.logger.log(`🧹 Found orphaned client for session ${sessionId}, cleaning up...`);
                     const clientInstance = this.clients.get(sessionId);
                     if (clientInstance) {
                         await this.cleanupOrphanedClient(sessionId, clientInstance.client);
                     }
+                } else {
+                    this.logger.log(`✅ Client ${sessionId} has valid database record`);
                 }
             } catch (error) {
-                this.logger.error(`Error checking session ${sessionId} during cleanup:`, error);
+                this.logger.error(`❌ Error checking session ${sessionId} during cleanup:`, error);
+                // Continue with other sessions even if one fails
             }
         }
+
+        this.logger.log(`✅ Orphaned client cleanup completed`);
     }
 
 

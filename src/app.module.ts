@@ -31,10 +31,13 @@ import { WebjsModule } from './webjs/webjs.module';
     BullModule.forRoot(
       {
         connection: {
-          host: "redis-15227.c8.us-east-1-2.ec2.redns.redis-cloud.com",
-          port: 15227,
-          password: "jgXQwDNDe7s8xaIhFBOpEFUk773hD5sc",
-          username: "default"
+          host: process.env.REDIS_HOST,
+          port: process.env.REDIS_PORT,
+          password: process.env.REDIS_PASSWORD,
+          username: process.env.REDIS_USERNAME,
+          tls: {
+            rejectUnauthorized: false
+          }
         }
       }
     ),
