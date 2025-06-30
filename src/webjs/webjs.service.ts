@@ -912,7 +912,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
                 const qrTimeoutHandle = setTimeout(async () => {
                     this.logger.log(`⏰ QR timeout reached for session ${sessionId}`);
                     await this.handleQRTimeout(sessionId);
-                }, 60000); // 60 seconds = 60,000 milliseconds
+                }, 120000); // 60 seconds = 60,000 milliseconds
 
                 // Store the QR timeout handle
                 const existingTimers = this.activeTimers.get(sessionId) || {};
