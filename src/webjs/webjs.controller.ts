@@ -621,7 +621,7 @@ export class WebjsController {
   @Delete('sessions/:sessionId')
   @ApiOperation({
     summary: 'Delete WhatsApp session',
-    description: 'Permanently deletes a WhatsApp session and cleans up all associated resources.'
+    description: 'Permanently deletes a WhatsApp session and performs comprehensive cleanup including: destroying client instance, clearing timers, removing from memory cache, cleaning local auth data, and deleting database record. Ensures no traces remain for fresh session creation.'
   })
   @ApiParam({
     name: 'sessionId',
@@ -630,7 +630,7 @@ export class WebjsController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Session deleted successfully',
+    description: 'Session deleted successfully with comprehensive cleanup',
     example: {
       message: 'Session deleted successfully'
     }
@@ -656,43 +656,7 @@ export class WebjsController {
     }
   }
 
-  @Delete('users/:userId/sessions')
-  @ApiOperation({
-    summary: 'Delete all user sessions',
-    description: 'Permanently deletes all WhatsApp sessions for a user and cleans up all associated resources.'
-  })
-  @ApiParam({
-    name: 'userId',
-    description: 'User ID',
-    example: 'user_123456789'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'All user sessions deleted successfully',
-    example: {
-      message: 'All sessions deleted successfully for user user_123456789'
-    }
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Failed to delete sessions',
-    example: {
-      statusCode: 400,
-      message: 'Failed to delete user sessions',
-      error: 'Bad Request'
-    }
-  })
-  async deleteAllUserSessions(@Param('userId') userId: string) {
-    try {
-      await this.webjsService.deleteAllUserSessions(userId);
-      return { message: `All sessions deleted successfully for user ${userId}` };
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Failed to delete user sessions',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
+
 
   @Get('users/:userId/sessions')
   @ApiOperation({

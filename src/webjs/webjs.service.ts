@@ -238,7 +238,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             throw new Error('User not found');
         }
 
-        // Check if user already has an active session and delete it
+        // Step 1: Check if session already exists for the user
         const existingSession = await this.databaseService.whatsAppSession.findFirst({
             where: {
                 user_id,
@@ -248,17 +248,85 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             },
         });
 
-
         if (existingSession) {
-            this.logger.log(`Deleting existing session ${existingSession.session_id} for user ${user_id}`);
-            try {
-                await this.deleteSession(existingSession.session_id);
-                this.logger.log(`Successfully deleted existing session for user ${user_id}`);
-            } catch (error) {
-                this.logger.error(`Failed to delete existing session: ${error.message}`);
-                // Continue anyway - we'll create a new session
+            this.logger.log(`📋 Found existing session ${existingSession.session_id} for user ${user_id} with status: ${existingSession.status}`);
+
+            // Step 3: Session Expiry Validation
+            const sessionExpired = await this.isSessionExpired(existingSession);
+
+            if (!sessionExpired) {
+                // Step 4a: Session is NOT expired - Update status and return
+                this.logger.log(`✅ Existing session ${existingSession.session_id} is still valid, updating status...`);
+
+                let updatedStatus = existingSession.status;
+
+                // Update status based on current state
+                if (existingSession.status === WhatsAppSessionStatus.AUTHENTICATED ||
+                    existingSession.status === WhatsAppSessionStatus.READY) {
+                    updatedStatus = WhatsAppSessionStatus.READY;
+                } else if (existingSession.status === WhatsAppSessionStatus.QR_READY) {
+                    // QR is still valid, keep QR_READY status
+                    updatedStatus = WhatsAppSessionStatus.QR_READY;
+                }
+
+                await this.safeUpdateSession(existingSession.session_id, {
+                    status: updatedStatus,
+                    last_activity: new Date(),
+                });
+
+                this.logger.log(`🔄 Session ${existingSession.session_id} status updated to ${updatedStatus}`);
+
+                // Return session with updated status
+                const sessionDto = this.mapSessionToDto(existingSession);
+                sessionDto.status = updatedStatus;
+
+                return sessionDto;
+            } else {
+                // Step 4b: Session IS expired - Re-initialize existing session
+                this.logger.log(`⏰ Existing session ${existingSession.session_id} has expired, re-initializing...`);
+
+                // Clean up any existing client instance
+                if (this.clients.has(existingSession.session_id)) {
+                    try {
+                        const clientInstance = this.clients.get(existingSession.session_id);
+                        await clientInstance?.client?.destroy();
+                        this.clients.delete(existingSession.session_id);
+                        this.logger.log(`🧹 Cleaned up expired client for session ${existingSession.session_id}`);
+                    } catch (error) {
+                        this.logger.error(`❌ Error cleaning up expired client:`, error);
+                    }
+                }
+
+                // Reset session status and clear expired data
+                await this.safeUpdateSession(existingSession.session_id, {
+                    status: WhatsAppSessionStatus.INITIALIZING,
+                    qr_code: null,
+                    is_ready: false,
+                    is_authenticated: false,
+                    last_error: null,
+                    last_error_time: null,
+                    last_activity: new Date(),
+                });
+
+                // Initialize the existing session (generate new QR or restore auth)
+                try {
+                    const initResult = await this.initializeClient(existingSession.session_id);
+
+                    const sessionDto = this.mapSessionToDto(existingSession);
+                    sessionDto.status = initResult.status;
+                    sessionDto.qr_code = initResult.qr_code;
+
+                    this.logger.log(`🔄 Existing session ${existingSession.session_id} re-initialized successfully`);
+                    return sessionDto;
+                } catch (error) {
+                    this.logger.error(`❌ Failed to re-initialize expired session ${existingSession.session_id}:`, error);
+                    throw new Error(`Failed to re-initialize session: ${error.message}`);
+                }
             }
         }
+
+        // Step 2: No existing session - Create new session
+        this.logger.log(`📝 No existing session found for user ${user_id}, creating new session...`);
 
         // Use user_id as session_id since one user = one session
         const sessionId = user_id;
@@ -273,9 +341,89 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             },
         });
 
-        this.logger.log(`Created session ${sessionId} for user ${user_id}`);
+        this.logger.log(`✅ Created new session ${sessionId} for user ${user_id}`);
 
-        return this.mapSessionToDto(session);
+        // Initialize the new session
+        try {
+            const initResult = await this.initializeClient(sessionId);
+
+            const sessionDto = this.mapSessionToDto(session);
+            sessionDto.status = initResult.status;
+            sessionDto.qr_code = initResult.qr_code;
+
+            this.logger.log(`🚀 New session ${sessionId} initialized successfully`);
+            return sessionDto;
+        } catch (error) {
+            this.logger.error(`❌ Failed to initialize new session ${sessionId}:`, error);
+            throw new Error(`Failed to initialize session: ${error.message}`);
+        }
+    }
+
+    // Helper method to check if a session has expired
+    private async isSessionExpired(session: any): Promise<boolean> {
+        try {
+            const now = Date.now();
+            const sessionUpdatedAt = new Date(session.updated_at).getTime();
+            const sessionAge = now - sessionUpdatedAt;
+
+            // Check different expiry conditions based on session status
+            switch (session.status) {
+                case WhatsAppSessionStatus.QR_READY:
+                    // QR codes expire after 20 seconds (WhatsApp Web standard)
+                    const qrExpired = sessionAge > 20000;
+                    if (qrExpired) {
+                        this.logger.log(`⏰ QR code expired for session ${session.session_id} (${Math.round(sessionAge / 1000)}s old)`);
+                    }
+                    return qrExpired;
+
+                case WhatsAppSessionStatus.INITIALIZING:
+                    // Initializing sessions expire after 5 minutes if stuck
+                    const initExpired = sessionAge > 5 * 60 * 1000;
+                    if (initExpired) {
+                        this.logger.log(`⏰ Initializing session expired for ${session.session_id} (${Math.round(sessionAge / 60000)}m old)`);
+                    }
+                    return initExpired;
+
+                case WhatsAppSessionStatus.AUTHENTICATED:
+                case WhatsAppSessionStatus.READY:
+                    // Check if client instance exists in memory
+                    const hasActiveClient = this.clients.has(session.session_id);
+                    if (!hasActiveClient) {
+                        // Session is marked as ready/authenticated but no active client
+                        // Consider expired if last activity was more than 1 hour ago
+                        const lastActivity = session.last_activity ? new Date(session.last_activity).getTime() : sessionUpdatedAt;
+                        const inactivityTime = now - lastActivity;
+                        const inactivityExpired = inactivityTime > 60 * 60 * 1000; // 1 hour
+
+                        if (inactivityExpired) {
+                            this.logger.log(`⏰ Session ${session.session_id} expired due to inactivity (${Math.round(inactivityTime / 60000)}m inactive)`);
+                        }
+                        return inactivityExpired;
+                    }
+
+                    // Session has active client, check if client is still valid
+                    const clientInstance = this.clients.get(session.session_id);
+                    if (clientInstance && (!clientInstance.isReady || !clientInstance.isAuthenticated)) {
+                        this.logger.log(`⏰ Session ${session.session_id} expired - client not ready/authenticated`);
+                        return true;
+                    }
+
+                    return false; // Session is valid
+
+                case WhatsAppSessionStatus.DISCONNECTED:
+                    // Disconnected sessions are considered expired
+                    return true;
+
+                default:
+                    // Unknown status, consider expired
+                    this.logger.warn(`⚠️ Unknown session status ${session.status} for session ${session.session_id}, considering expired`);
+                    return true;
+            }
+        } catch (error) {
+            this.logger.error(`❌ Error checking session expiry for ${session.session_id}:`, error);
+            // On error, consider session expired for safety
+            return true;
+        }
     }
 
     async initializeClient(sessionId: string, isRestoration: boolean = false, retryCount: number = 0): Promise<QRCodeResponseDto> {
@@ -1780,49 +1928,106 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
+        this.logger.log(`🗑️ Starting comprehensive deletion of session ${sessionId}...`);
+
         try {
-            // First destroy the client if it exists
-            await this.destroySession(sessionId);
+            // Step 1: Clear all active timers associated with the session
+            this.logger.log(`🧹 Clearing timers for session ${sessionId}...`);
+            this.cleanupSessionTimers(sessionId);
 
-            // Delete from database
-            await this.databaseService.whatsAppSession.delete({
-                where: { session_id: sessionId },
-            });
-
-            this.logger.log(`Session ${sessionId} deleted successfully`);
-        } catch (error) {
-            // If session doesn't exist in database, that's fine
-            if (error.code === 'P2025') {
-                this.logger.log(`Session ${sessionId} was already deleted from database`);
-            } else {
-                this.logger.error(`Error deleting session ${sessionId}:`, error);
-                throw error;
-            }
-        }
-    }
-
-    // Helper method to force delete all sessions for a user
-    async deleteAllUserSessions(userId: string): Promise<void> {
-        try {
-            const sessions = await this.databaseService.whatsAppSession.findMany({
-                where: { user_id: userId },
-            });
-
-            for (const session of sessions) {
+            // Step 2: Destroy WhatsApp client instance from memory
+            this.logger.log(`🔌 Destroying client instance for session ${sessionId}...`);
+            const clientInstance = this.clients.get(sessionId);
+            if (clientInstance) {
                 try {
-                    await this.deleteSession(session.session_id);
-                } catch (error) {
-                    this.logger.error(`Failed to delete session ${session.session_id}:`, error);
-                    // Continue with other sessions
+                    await clientInstance.client.destroy();
+                    this.logger.log(`✅ Client destroyed for session ${sessionId}`);
+                } catch (clientError) {
+                    this.logger.error(`❌ Error destroying client for session ${sessionId}:`, clientError);
+                    // Continue with cleanup even if client destroy fails
+                }
+            } else {
+                this.logger.log(`ℹ️ No active client found for session ${sessionId}`);
+            }
+
+            // Step 3: Remove session from in-memory clients Map cache
+            this.logger.log(`🧹 Removing session ${sessionId} from memory cache...`);
+            if (this.clients.has(sessionId)) {
+                this.clients.delete(sessionId);
+                this.logger.log(`✅ Session ${sessionId} removed from memory cache`);
+            }
+
+            // Step 4: Clean up local authentication data (.wwebjs_auth folder)
+            this.logger.log(`🗂️ Cleaning up local auth data for session ${sessionId}...`);
+            try {
+                const fs = require('fs');
+                const path = require('path');
+                const authPath = path.join(process.cwd(), '.wwebjs_auth', sessionId);
+
+                if (fs.existsSync(authPath)) {
+                    fs.rmSync(authPath, { recursive: true, force: true });
+                    this.logger.log(`✅ Local auth data cleared for session ${sessionId}`);
+                } else {
+                    this.logger.log(`ℹ️ No local auth data found for session ${sessionId}`);
+                }
+            } catch (authError) {
+                this.logger.error(`❌ Error cleaning up local auth data for session ${sessionId}:`, authError);
+                // Continue with cleanup even if auth cleanup fails
+            }
+
+            // Step 5: Delete session record from database
+            this.logger.log(`🗄️ Deleting session ${sessionId} from database...`);
+            try {
+                await this.databaseService.whatsAppSession.delete({
+                    where: { session_id: sessionId },
+                });
+                this.logger.log(`✅ Session ${sessionId} deleted from database`);
+            } catch (dbError) {
+                // If session doesn't exist in database, that's fine
+                if (dbError.code === 'P2025') {
+                    this.logger.log(`ℹ️ Session ${sessionId} was already deleted from database`);
+                } else {
+                    this.logger.error(`❌ Error deleting session ${sessionId} from database:`, dbError);
+                    throw dbError; // Re-throw database errors that aren't "not found"
                 }
             }
 
-            this.logger.log(`Deleted all sessions for user ${userId}`);
+            // Step 6: Final verification - ensure no traces remain
+            this.logger.log(`🔍 Performing final verification for session ${sessionId}...`);
+            const remainsInMemory = this.clients.has(sessionId);
+            const hasActiveTimers = this.activeTimers.has(sessionId);
+
+            if (remainsInMemory || hasActiveTimers) {
+                this.logger.warn(`⚠️ Session ${sessionId} cleanup incomplete - Memory: ${remainsInMemory}, Timers: ${hasActiveTimers}`);
+
+                // Force cleanup any remaining traces
+                if (remainsInMemory) {
+                    this.clients.delete(sessionId);
+                }
+                if (hasActiveTimers) {
+                    this.cleanupSessionTimers(sessionId);
+                }
+            }
+
+            this.logger.log(`🎉 Session ${sessionId} completely deleted and cleaned up successfully`);
+
         } catch (error) {
-            this.logger.error(`Error deleting all sessions for user ${userId}:`, error);
+            this.logger.error(`❌ Error during comprehensive deletion of session ${sessionId}:`, error);
+
+            // Even if there's an error, try to clean up what we can
+            try {
+                this.cleanupSessionTimers(sessionId);
+                this.clients.delete(sessionId);
+                this.logger.log(`🧹 Emergency cleanup performed for session ${sessionId}`);
+            } catch (emergencyError) {
+                this.logger.error(`❌ Emergency cleanup failed for session ${sessionId}:`, emergencyError);
+            }
+
             throw error;
         }
     }
+
+
 
     async restartSession(sessionId: string): Promise<QRCodeResponseDto> {
         // Destroy existing client
@@ -1846,6 +2051,7 @@ export class WebjsService implements OnModuleDestroy, OnModuleInit {
             is_ready: session.is_ready,
             qr_code: session.qr_code,
             status: session.status,
+            qr_endpoint: `/webjs/sessions/${session.session_id}/qr`,
             last_activity: session.last_activity,
             created_at: session.created_at,
             updated_at: session.updated_at,

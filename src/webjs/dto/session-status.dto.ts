@@ -10,6 +10,7 @@ export class SessionStatusDto {
   is_ready: boolean;
   qr_code?: string;
   status: WhatsAppSessionStatus;
+  qr_endpoint?: string;
   last_activity?: Date;
   created_at: Date;
   updated_at: Date;
