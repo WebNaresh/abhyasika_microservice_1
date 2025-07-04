@@ -105,6 +105,7 @@ model Library {
   library_plans            LibraryPlans[]
   subAdmin                 User[]                    @relation(name: "subAdmin")
   interested_students      User[]                    @relation(name: "interested_library")
+  isActive                 Boolean                   @default(true)
   Room                     Room[]
   DeskMatrix               DeskMatrix[]
   DeskNode                 DeskNode[]
@@ -125,6 +126,7 @@ model Library {
   receipt_settings         ReceiptSettings?
   LibraryAdmissionQuestion LibraryAdmissionQuestion?
   reviews                  Review[]
+  CustomDomain             CustomDomain[]
 
   @@index([id])
   @@index([library_url])
@@ -833,4 +835,20 @@ enum WhatsAppSessionStatus {
   READY
   DISCONNECTED
   DESTROYED
+}
+
+model CustomDomain {
+  id                String   @id @default(cuid())
+  domain_name       String   @unique
+  library_id        String
+  library           Library  @relation(fields: [library_id], references: [id], onDelete: Cascade)
+  verified          Boolean  @default(false)
+  verification_code String?
+  is_primary        Boolean  @default(false)
+  ssl_status        String   @default("pending") // pending, active, failed
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([library_id])
+  @@index([domain_name])
 }
