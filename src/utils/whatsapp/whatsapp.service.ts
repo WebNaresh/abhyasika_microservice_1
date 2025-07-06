@@ -1363,8 +1363,104 @@ Best regards,
     }
   }
 
-  async send_payment_received_notification(props: PaymentReceivedNotificationDto) {
+  // Send payment received notification via WhatsApp Web
+  private async sendPaymentReceivedNotificationViaWhatsAppWeb(sessionId: string, props: PaymentReceivedNotificationDto): Promise<any> {
     try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Get library name from library URL (we'll need to fetch this from database)
+      const library = await this.databaseService.library.findUnique({
+        where: { library_url: props.library_url }
+      });
+
+      const libraryName = library?.name || 'Library';
+
+      // Create payment received notification message using the new template
+      const messageContent = `Hello *${props.member_name}*,
+Your recent library plan continuation request has been rejected.
+
+📌 Please check the details and take necessary action here:
+👉 https://${props.library_url}/profile/plan_continuation
+
+If you believe this is a mistake or need help, kindly contact.
+
+Thank you!
+*${libraryName}*`;
+
+      console.log(`📝 Payment received notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Payment received notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send payment received notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
+  async send_payment_received_notification(props: PaymentReceivedNotificationDto) {
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      console.error('Invalid receiver mobile number provided for payment received notification')
+      return {
+        data: 'Invalid receiver mobile number',
+        success: false
+      }
+    }
+
+    try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending payment received notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendPaymentReceivedNotificationViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web payment received notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending payment received notification via API method...`);
+
       // Create the body using the WhatsappBodyDto class with domain parameter
       const whatsappBody = new WhatsappBodyDto(
         'payment_received_notification',
@@ -1380,7 +1476,7 @@ Best regards,
       // Use the new sendMessage method which now has domain built-in
       return await whatsappBody.sendMessage();
     } catch (error) {
-      console.error(error);
+      console.error('Error sending payment received notification:', error);
       this.handleAxiosError(error);
     }
   }
