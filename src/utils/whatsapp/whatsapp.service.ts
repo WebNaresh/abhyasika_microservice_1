@@ -1405,64 +1405,7 @@ Best regards,
       }
     }
   }
-  // Send admin admission notification via WhatsApp Web
-  private async sendAdmissionNotificationAdminViaWhatsAppWeb(sessionId: string, props: AdmissionAdminDto): Promise<any> {
-    try {
-      if (!this.webjsService) {
-        throw new Error('WhatsApp Web service not available');
-      }
 
-      // Format phone number for WhatsApp Web (remove + and ensure country code)
-      let phoneNumber = props.library_contact.replace(/\D/g, ''); // Remove all non-digits
-
-      // Add country code if not present (assuming Indian numbers)
-      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
-        phoneNumber = `91${phoneNumber}`;
-      }
-
-      // Create admin admission notification message using the new template
-      const messageContent = `**New Admission Alert - ${props.library_name}**
-
-Hello,
-
-A new member has successfully completed their admission to your study hall. Please find the student's membership details below:
-
-1) Name: *${props.student_name}*
-2) Branch: *${props.branch_name}*
-3) Room: *${props.room_name}*
-4) Desk No.: 🪑 *${props.desk_name}*
-5) Plan: *${props.plan_name}*
-6) Plan Start Date: 📅 *${props.plan_start_date}*
-7) Plan End Date: 📅 *${props.plan_end_date}*
-
-Please make necessary arrangements and ensure the desk is ready for the student.
-
-Best regards,
-*${props.library_name}*`;
-
-      console.log(`📝 Admin admission notification message content prepared:`, messageContent);
-
-      // Send via WhatsApp Web
-      const result = await this.webjsService.sendMessage({
-        session_id: sessionId,
-        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
-        message: messageContent
-      });
-
-      // Check if the result indicates success
-      if (result && result.success) {
-        console.log(`✅ Admin admission notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
-        return result;
-      } else {
-        const errorMsg = result?.error || 'Unknown error occurred';
-        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
-        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
-      }
-    } catch (error) {
-      console.error(`❌ Failed to send admin admission notification via WhatsApp Web:`, error);
-      throw error;
-    }
-  }
 
   async send_admission_notification_admin(props: AdmissionAdminDto) {
     if (props.library_contact === null || props.library_contact === undefined || props.library_contact === "") {
@@ -1471,33 +1414,6 @@ Best regards,
     }
 
     try {
-      // Step 1: Check if library has an active WhatsApp Web session
-      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
-      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
-
-      if (whatsappWebSession) {
-        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending admin notification via WhatsApp Web...`);
-        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
-
-        try {
-          const result = await this.sendAdmissionNotificationAdminViaWhatsAppWeb(whatsappWebSession.session_id, props);
-          console.log(`✅ WhatsApp Web admin admission notification completed successfully`);
-
-          // Create billing record for WhatsApp Web usage
-          await this.billing_service.create_whatsapp_billing({
-            library_url: props.library_url,
-          });
-
-          return result;
-        } catch (webError) {
-          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
-          // Fall through to API method
-        }
-      } else {
-        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
-      }
-
-      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
       console.log(`📞 Sending admin admission notification via API method...`);
 
       const student_contact = props.library_contact || "9370928324";
@@ -1553,7 +1469,7 @@ Best regards,
       return response.data;
     } catch (error) {
       console.error('Error sending admin admission notification:', error)
-      return {}
+      this.handleAxiosError(error);
     }
   }
 

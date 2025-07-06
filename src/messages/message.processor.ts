@@ -102,6 +102,8 @@ export class AdmissionMessageProcessor extends WorkerHost {
 
             if (process.env.ENV !== 'development') {
 
+                console.log("Sending the message to the student")
+
                 await this.whatsapp.send_admission_notification(send_whatsapp).catch((error) => {
                     console.log(`🚀 ~ AdmissionMessageProcessor ~ error:`, error)
                     // Continue processing even if there's an error
