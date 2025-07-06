@@ -364,6 +364,7 @@ export class PaymentScreenshotUploadProcessor extends WorkerHost {
         super();
     }
     async process(job: Job) {
+        console.log(`🚀 ~ PaymentScreenshotUploadProcessor ~ job:`, job)
         try {
             const send_whatsapp: PaymentScreenshotUploadDto = job.data.content;
             console.log(job.data);

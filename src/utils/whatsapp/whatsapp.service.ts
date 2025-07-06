@@ -331,9 +331,78 @@ Best regards,
     }
   }
 
+  // Send pending payment notification via WhatsApp Web
+  private async sendPendingPaymentViaWhatsAppWeb(sessionId: string, props: AbhyasikaPendingPaymentDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Handle the case where student_seat is "N/A"
+      const seatInfo = props.student_seat === "N/A" ? props.library_name : props.student_seat;
+
+      // Create pending payment notification message using the new template
+      const messageContent = `Reservation Confirmation Required for *${props.library_name}*
+
+Dear *${props.student_name}*,
+
+I hope this message finds you well. We are currently awaiting confirmation of your reservation for the *${seatInfo}*.
+
+To secure your reserved seat, kindly check in and confirm your reservation using your email, *${props.student_email}*, as soon as possible. If we do not receive your confirmation, your seat may be reassigned to another member, and you may incur charges for any inconvenience caused.
+
+We appreciate your prompt attention to this matter.
+
+Best regards,
+
+*${seatInfo}*
+*${props.library_name}*
+‪*+91${props.library_contact}*`;
+
+      console.log(`📝 Pending payment notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Pending payment notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send pending payment notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
   // Similar error handling for pending_payment
   async pending_payment(props: AbhyasikaPendingPaymentDto) {
     console.log(`🚀 ~ WhatsappService ~ pending_payment props:`, props);
+
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      console.error('Invalid receiver mobile number provided for pending payment notification')
+      return {
+        data: 'Invalid receiver mobile number',
+        success: false
+      }
+    }
+
     const {
       library_name,
       library_contact,
@@ -345,6 +414,35 @@ Best regards,
     } = props;
 
     try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${library_url}, sending pending payment notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendPendingPaymentViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web pending payment notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending pending payment notification via API method...`);
+
       const whatsapp_body = new WhatsappBodyDto(
         "abhyasika_pending_payment",
         receiver_mobile_number,
@@ -374,6 +472,7 @@ Best regards,
 
       return await whatsapp_body.sendMessage(this.billing_service);
     } catch (error) {
+      console.error('Error sending pending payment notification:', error);
       this.handleAxiosError(error);
     }
   }
@@ -554,11 +653,108 @@ Thank you,
     }
   }
 
+  // Send payment receipt notification via WhatsApp Web
+  private async sendPaymentReceiptViaWhatsAppWeb(sessionId: string, props: PaymentReceiptDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Create payment receipt notification message using the new template
+      const messageContent = `Payment Receipt - *${props.library_name}*
+
+Dear *${props.student_name}* 🌟,
+
+We are pleased to confirm the successful receipt of your payment 💳. Here are your payment details:
+
+📧 Email: *${props.student_email}*
+🪑 Seat Number: *${props.seat_title}*
+📜 Plan: *${props.plan_name}*
+📅 Next Payment Date: *${props.plan_expiration_date}*
+
+Thank you for choosing *${props.library_name}* 🙏. If you have any questions or need assistance, feel free to reach out to us 📞.
+
+We'd love to hear your thoughts!
+💬 Leave a Review — https://${props.library_url}.abhyasika.online/review
+
+Best regards,
+*${props.library_name}*
+☎ ‪*+91${props.library_contact_no}*`;
+
+      console.log(`📝 Payment receipt notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Payment receipt notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send payment receipt notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
   async send_payment_receipt(props: PaymentReceiptDto) {
     console.log(`🚀 ~ file: whatsapp.service.ts:404 ~ WhatsappService ~ props:`, props)
 
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      console.error('Invalid receiver mobile number provided for payment receipt notification')
+      return {
+        data: 'Invalid receiver mobile number',
+        success: false
+      }
+    }
 
     try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending payment receipt notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendPaymentReceiptViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web payment receipt notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending payment receipt notification via API method...`);
+
       const body = new WhatsappBodyDto(
         'study_room_payment_receipt',
         props.receiver_mobile_number,
@@ -587,12 +783,10 @@ Thank you,
         }])
 
       return await body.sendMessage(this.billing_service);
-
     } catch (error) {
+      console.error('Error sending payment receipt notification:', error);
       console.log(error);
     }
-
-
   }
 
   async send_interested_notification(props: InterestedMessageDto) {
@@ -1495,8 +1689,107 @@ Thank you!
     }
   }
 
-  async send_first_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+  // Send first reminder plan renewal notification via WhatsApp Web
+  private async sendFirstReminderPlanRenewalViaWhatsAppWeb(sessionId: string, props: FirstReminderPlanRenewalPendingV1Dto): Promise<any> {
     try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Create first reminder plan renewal notification message using the new template
+      const messageContent = `*${props.library_name}*
+📢 First Reminder – Pending Fees
+
+Hello *${props.member_name}*,
+This is a gentle reminder that your fee is pending. Kindly complete payment at the earliest to avoid interruption.
+
+Please follow these steps:
+
+① Visit: https://${props.library_url}.abhyasika.online
+② Login with your number.
+③ Tap the profile icon (top-right). (Reload the page if it's not visible.)
+④ Click on "Plan Continuation"
+⑤ Scan the QR code & make the payment
+⑥ Click "New Payment Request", upload the payment screenshot, fill in the details & submit
+
+📞 If you're facing any issues or need help, feel free to contact us.
+
+Thank you!
+– *${props.library_name}*
+‪*+91${props.library_contact}*`;
+
+      console.log(`📝 First reminder plan renewal notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ First reminder plan renewal notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send first reminder plan renewal notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
+  async send_first_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      console.error('Invalid receiver mobile number provided for first reminder plan renewal notification')
+      return {
+        data: 'Invalid receiver mobile number',
+        success: false
+      }
+    }
+
+    try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending first reminder plan renewal notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendFirstReminderPlanRenewalViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web first reminder plan renewal notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending first reminder plan renewal notification via API method...`);
+
       const whatsappBody = new WhatsappBodyDto(
         'first_reminder__plan_renewal_pending_v1',
         props.receiver_mobile_number,
@@ -1513,13 +1806,112 @@ Thank you!
 
       return await whatsappBody.sendMessage();
     } catch (error) {
-      console.error(error);
+      console.error('Error sending first reminder plan renewal notification:', error);
       this.handleAxiosError(error);
     }
   }
 
-  async send_second_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+  // Send second reminder plan renewal notification via WhatsApp Web
+  private async sendSecondReminderPlanRenewalViaWhatsAppWeb(sessionId: string, props: FirstReminderPlanRenewalPendingV1Dto): Promise<any> {
     try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Create second reminder plan renewal notification message using the new template
+      const messageContent = `*${props.library_name}*
+📢 Second Reminder – Fee Pending
+
+Hello *${props.member_name}*,
+This is a gentle reminder that your fee is pending. Kindly complete payment at the earliest to avoid interruption.
+
+Please follow these steps:
+
+① Visit: https://${props.library_url}.abhyasika.online
+② Login with your number.
+③ Tap the profile icon (top-right). (Reload the page if it's not visible.)
+④ Click on "Plan Continuation"
+⑤ Scan the QR code & make the payment
+⑥ Click "New Payment Request", upload the payment screenshot, fill in the details & submit
+
+📞 If you're facing any issues or need help, feel free to contact us.
+
+Thank you!
+– *${props.library_name}*
+‪*+91${props.library_contact}*`;
+
+      console.log(`📝 Second reminder plan renewal notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Second reminder plan renewal notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send second reminder plan renewal notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
+  async send_second_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      console.error('Invalid receiver mobile number provided for second reminder plan renewal notification')
+      return {
+        data: 'Invalid receiver mobile number',
+        success: false
+      }
+    }
+
+    try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending second reminder plan renewal notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendSecondReminderPlanRenewalViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web second reminder plan renewal notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending second reminder plan renewal notification via API method...`);
+
       const whatsappBody = new WhatsappBodyDto(
         'second_reminder__plan_renewal_pending',
         props.receiver_mobile_number,
@@ -1536,13 +1928,116 @@ Thank you!
 
       return await whatsappBody.sendMessage();
     } catch (error) {
-      console.error(error);
+      console.error('Error sending second reminder plan renewal notification:', error);
       this.handleAxiosError(error);
     }
   }
 
-  async send_third_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+  // Send third reminder plan renewal notification via WhatsApp Web
+  private async sendThirdReminderPlanRenewalViaWhatsAppWeb(sessionId: string, props: FirstReminderPlanRenewalPendingV1Dto): Promise<any> {
     try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.receiver_mobile_number.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Create third reminder plan renewal notification message using the new template
+      const messageContent = `*${props.library_name}*
+📢 Final Reminder – Immediate Action Required
+
+Hello *${props.member_name}*,
+This is the final reminder regarding your pending library plan renewal. Despite multiple notifications, your plan is still not renewed.
+
+⚠ Your current seat has been allocated to another member.
+If we do not receive your payment immediately, your membership will be cancelled.
+
+Please complete the renewal process now:
+
+① Visit: https://${props.library_url}.abhyasika.online
+② Login with your number
+③ Tap the profile icon (top-right). (Reload if not visible.)
+④ Click Plan Continuation
+⑤ Scan the QR code & make the payment
+⑥ Click New Payment Request, upload the payment screenshot, fill in the details & submit
+
+💬 If you're facing any issues, please contact us immediately.
+This is your final opportunity to continue your membership.
+
+Thank you,
+– *${props.library_name}*
+‪*+91${props.library_contact}*`;
+
+      console.log(`📝 Third reminder plan renewal notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Third reminder plan renewal notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send third reminder plan renewal notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
+  async send_third_reminder_plan_renewal_pending_v1(props: FirstReminderPlanRenewalPendingV1Dto) {
+    // Validate required fields
+    if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
+      console.error('Invalid receiver mobile number provided for third reminder plan renewal notification')
+      return {
+        data: 'Invalid receiver mobile number',
+        success: false
+      }
+    }
+
+    try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending third reminder plan renewal notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendThirdReminderPlanRenewalViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web third reminder plan renewal notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending third reminder plan renewal notification via API method...`);
+
       const whatsappBody = new WhatsappBodyDto(
         'final_reminder__immediate_action_required',
         props.receiver_mobile_number,
@@ -1559,7 +2054,7 @@ Thank you!
 
       return await whatsappBody.sendMessage();
     } catch (error) {
-      console.error(error);
+      console.error('Error sending third reminder plan renewal notification:', error);
       this.handleAxiosError(error);
     }
   }
