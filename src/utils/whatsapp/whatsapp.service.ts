@@ -552,19 +552,113 @@ Best regards,
 
   }
 
+  // Send admission notification via WhatsApp Web
+  private async sendAdmissionNotificationViaWhatsAppWeb(sessionId: string, props: AdmissionDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.student_contact.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Set default values if not provided
+      const branch_name = props.branch_name || "N/A";
+      const room_name = props.room_name || "N/A";
+      const desk_name = props.desk_name || "N/A";
+
+      // Create admission notification message using the new template
+      const messageContent = `**Admission Successful - ${props.library_name}**
+
+Hello *${props.student_name}*,
+
+Your admission to *${props.library_name}* has been successfully completed! Here are your membership details:
+
+1) Name: *${props.student_name}*
+2) Branch: *${branch_name}*
+3) Room: *${room_name}*
+4) Desk No.: 🪑 *${desk_name}*
+5) Plan: *${props.plan_name}*
+6) Plan Start Date: 📅 *${props.admission_date}*
+7) Plan End Date: 📅 *${props.admission_end_date}*
+
+We're excited to have you as part of our community. If you have any questions, feel free to reach out!
+
+Best regards,
+*${props.library_name}*
+‪*+91${props.library_contact_no}*`;
+
+      console.log(`📝 Admission notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Admission notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send admission notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
   async send_admission_notification(props: AdmissionDto) {
     if (props.student_contact === null || props.student_contact === undefined || props.student_contact === "") {
-      console.error()
+      console.error('Invalid student contact provided')
       return {}
     }
 
-    // Set default values if not provided
-    const branch_name = props.branch_name || "N/A";
-    const room_name = props.room_name || "N/A";
-    const desk_name = props.desk_name || "N/A";
-    const student_contact = props.student_contact || "9370928324";
-
     try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendAdmissionNotificationViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web admission notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending admission notification via API method...`);
+
+      // Set default values if not provided
+      const branch_name = props.branch_name || "N/A";
+      const room_name = props.room_name || "N/A";
+      const desk_name = props.desk_name || "N/A";
+      const student_contact = props.student_contact || "9370928324";
+
       const body = {
         messaging_product: 'whatsapp',
         to: `91${student_contact}`,
@@ -617,7 +711,8 @@ Best regards,
 
       return response.data;
     } catch (error) {
-      console.error(error)
+      console.error('Error sending admission notification:', error)
+      return {}
     }
   }
 
@@ -1013,15 +1108,103 @@ Best regards,
       }
     }
   }
+  // Send admin admission notification via WhatsApp Web
+  private async sendAdmissionNotificationAdminViaWhatsAppWeb(sessionId: string, props: AdmissionAdminDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.library_contact.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Create admin admission notification message using the new template
+      const messageContent = `**New Admission Alert - ${props.library_name}**
+
+Hello,
+
+A new member has successfully completed their admission to your study hall. Please find the student's membership details below:
+
+1) Name: *${props.student_name}*
+2) Branch: *${props.branch_name}*
+3) Room: *${props.room_name}*
+4) Desk No.: 🪑 *${props.desk_name}*
+5) Plan: *${props.plan_name}*
+6) Plan Start Date: 📅 *${props.plan_start_date}*
+7) Plan End Date: 📅 *${props.plan_end_date}*
+
+Please make necessary arrangements and ensure the desk is ready for the student.
+
+Best regards,
+*${props.library_name}*`;
+
+      console.log(`📝 Admin admission notification message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Admin admission notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send admin admission notification via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
   async send_admission_notification_admin(props: AdmissionAdminDto) {
     if (props.library_contact === null || props.library_contact === undefined || props.library_contact === "") {
-      console.error()
+      console.error('Invalid library contact provided')
       return {}
     }
 
-    const student_contact = props.library_contact || "9370928324";
-
     try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${props.library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
+
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending admin notification via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendAdmissionNotificationAdminViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web admin admission notification completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: props.library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
+        }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${props.library_url}`);
+      }
+
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending admin admission notification via API method...`);
+
+      const student_contact = props.library_contact || "9370928324";
+
       const body = {
         messaging_product: 'whatsapp',
         to: `91${student_contact}`,
@@ -1065,13 +1248,15 @@ Best regards,
         }
       );
       console.log(`🚀 ~ file: whatsapp.service.ts:576 ~ WhatsappService ~ response.data:`, response.data)
+
       await this.billing_service.create_whatsapp_billing({
         library_url: props.library_url,
       })
 
       return response.data;
     } catch (error) {
-      console.error(error)
+      console.error('Error sending admin admission notification:', error)
+      return {}
     }
   }
 
