@@ -379,6 +379,7 @@ Best regards,
   }
 
   async confirmation_template(props: ConfirmationTemplateDto) {
+    console.log(`🚀 ~ WhatsappService:382 ~ props:`, props)
     const {
       library_name,
       library_contact,
@@ -494,6 +495,7 @@ Best regards,
   }
 
   async send_interested_notification(props: InterestedMessageDto) {
+    console.log(`🚀 ~ WhatsappService:497 ~ send_interested_notification ~ props:`, props)
     try {
       const body = {
         messaging_product: 'whatsapp',
