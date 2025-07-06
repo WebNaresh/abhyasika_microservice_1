@@ -378,8 +378,74 @@ Best regards,
     }
   }
 
+  // Send reservation confirmation via WhatsApp Web
+  private async sendReservationConfirmationViaWhatsAppWeb(sessionId: string, props: ConfirmationTemplateDto): Promise<any> {
+    try {
+      if (!this.webjsService) {
+        throw new Error('WhatsApp Web service not available');
+      }
+
+      // Format phone number for WhatsApp Web (remove + and ensure country code)
+      let phoneNumber = props.student_contact.replace(/\D/g, ''); // Remove all non-digits
+
+      // Add country code if not present (assuming Indian numbers)
+      if (!phoneNumber.startsWith('91') && phoneNumber.length === 10) {
+        phoneNumber = `91${phoneNumber}`;
+      }
+
+      // Create reservation confirmation message using the new template
+      const messageContent = `**Reservation Confirmation Required**
+
+Dear *${props.student_name}*,
+
+Please confirm your *${props.library_name}* reservation by following these steps:
+
+1. Visit the study room website.
+2. Log in using your email (*${props.student_email}*).
+3. View the notification.
+4. Confirm your next month's reservation.
+
+Failure to confirm may result in seat *${props.student_seat}* reassignment and potential charges.
+
+Thank you,
+*${props.library_contact}*`;
+
+      console.log(`📝 Reservation confirmation message content prepared:`, messageContent);
+
+      // Send via WhatsApp Web
+      const result = await this.webjsService.sendMessage({
+        session_id: sessionId,
+        to: phoneNumber, // Send without + prefix, WebJS will add @c.us
+        message: messageContent
+      });
+
+      // Check if the result indicates success
+      if (result && result.success) {
+        console.log(`✅ Reservation confirmation sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        return result;
+      } else {
+        const errorMsg = result?.error || 'Unknown error occurred';
+        console.error(`❌ WhatsApp Web message failed: ${errorMsg}`);
+        throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
+      }
+    } catch (error) {
+      console.error(`❌ Failed to send reservation confirmation via WhatsApp Web:`, error);
+      throw error;
+    }
+  }
+
   async confirmation_template(props: ConfirmationTemplateDto) {
     console.log(`🚀 ~ WhatsappService:382 ~ props:`, props)
+
+    // Validate required fields
+    if (!props.student_contact || props.student_contact === 'null' || props.student_contact.trim() === '') {
+      console.error('Invalid student contact provided for reservation confirmation')
+      return {
+        data: 'Invalid student contact',
+        success: false
+      }
+    }
+
     const {
       library_name,
       library_contact,
@@ -392,65 +458,100 @@ Best regards,
     } = props;
 
     console.log(`🚀 ~ WhatsappService ~ library_url:`, library_url)
-    // fallback image
 
-    const body = {
-      messaging_product: 'whatsapp',
-      to: `91${student_contact}`,
-      type: 'template',
-      template: {
-        name: 'library_seat_confirmation_v2',
-        language: { code: 'en' },
-        components: [
-          {
-            type: 'body',
-            parameters: [
-              { type: 'text', text: this.limitText(student_name || '', 60) },
-              { type: 'text', text: this.limitText(library_name || '', 60) },
-              { type: 'text', text: this.limitText(student_email || '', 60) },
-              { type: 'text', text: this.limitText(library_contact || '', 60) },
-              { type: 'text', text: this.limitText(student_seat || '', 60) }
-            ]
-          },
-          {
-            type: 'button',
-            sub_type: 'url',
-            index: '0',
-            parameters: [
-              {
-                type: "payload",
-                payload: this.limitText(`/${library_url}`, 60),
-              }
-            ]
-          }
-        ]
-      }
-    };
+    try {
+      // Step 1: Check if library has an active WhatsApp Web session
+      console.log(`🔍 Checking for WhatsApp Web session for library: ${library_url}`);
+      const whatsappWebSession = await this.checkForWhatsAppWebSession(library_url);
 
-    const response = await axios.post(
-      'https://graph.facebook.com/v20.0/431174140080894/messages',
-      body,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
+      if (whatsappWebSession) {
+        console.log(`📱 Found active WhatsApp Web session for library ${library_url}, sending reservation confirmation via WhatsApp Web...`);
+        console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
+
+        try {
+          const result = await this.sendReservationConfirmationViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web reservation confirmation completed successfully`);
+
+          // Create billing record for WhatsApp Web usage
+          await this.billing_service.create_whatsapp_billing({
+            library_url: library_url,
+          });
+
+          return result;
+        } catch (webError) {
+          console.error(`❌ WhatsApp Web sending failed, falling back to API:`, webError.message);
+          // Fall through to API method
         }
+      } else {
+        console.log(`📞 No WhatsApp Web session found for library ${library_url}`);
       }
-    ).then(async (response) => {
 
-      await this.billing_service.create_whatsapp_billing({
-        library_url: library_url,
-      })
+      // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
+      console.log(`📞 Sending reservation confirmation via API method...`);
+
+      const body = {
+        messaging_product: 'whatsapp',
+        to: `91${student_contact}`,
+        type: 'template',
+        template: {
+          name: 'library_seat_confirmation_v2',
+          language: { code: 'en' },
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: this.limitText(student_name || '', 60) },
+                { type: 'text', text: this.limitText(library_name || '', 60) },
+                { type: 'text', text: this.limitText(student_email || '', 60) },
+                { type: 'text', text: this.limitText(library_contact || '', 60) },
+                { type: 'text', text: this.limitText(student_seat || '', 60) }
+              ]
+            },
+            {
+              type: 'button',
+              sub_type: 'url',
+              index: '0',
+              parameters: [
+                {
+                  type: "payload",
+                  payload: this.limitText(`/${library_url}`, 60),
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      const response = await axios.post(
+        'https://graph.facebook.com/v20.0/431174140080894/messages',
+        body,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_API_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      ).then(async (response) => {
+
+        await this.billing_service.create_whatsapp_billing({
+          library_url: library_url,
+        })
+        return response.data;
+      }).catch((_error) => {
+        return {
+          data: 'Error sending WhatsApp message',
+          success: false
+        }
+      });
+
       return response.data;
-    }).catch((_error) => {
+    } catch (error) {
+      console.error('Error sending reservation confirmation:', error)
       return {
         data: 'Error sending WhatsApp message',
         success: false
       }
-    });
-
-    return response.data;
-
+    }
   }
 
   async send_payment_receipt(props: PaymentReceiptDto) {
