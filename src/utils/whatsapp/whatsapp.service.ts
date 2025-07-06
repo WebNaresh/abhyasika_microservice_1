@@ -260,7 +260,7 @@ Best regards,
         text: props.library_contact
       }]).addButtonComponent("0", "url", [{
         type: 'text',
-        text: `library_redirect_method/${props.library_url}`
+        text: `https://${props.library_url}.abhyasika.online`
       }])
 
       return await whatsapp_body.sendMessage(this.billing_service);
@@ -322,7 +322,7 @@ Best regards,
         text: props.library_contact
       }]).addButtonComponent("0", "url", [{
         type: 'text',
-        text: `library_redirect_method/${props.library_url}`
+        text: `https://${props.library_url}.abhyasika.online`
       }])
 
       return await whatsapp_body.sendMessage(this.billing_service);
@@ -369,7 +369,7 @@ Best regards,
         text: library_contact
       }]).addButtonComponent("0", "url", [{
         type: "text",
-        text: `library_redirect_method/${library_url}/review`
+        text: `https://${library_url}.abhyasika.online/review`
       }])
 
       return await whatsapp_body.sendMessage(this.billing_service);
@@ -514,7 +514,7 @@ Thank you,
               parameters: [
                 {
                   type: "payload",
-                  payload: this.limitText(`/${library_url}`, 60),
+                  payload: this.limitText(`https://${library_url}.abhyasika.online`, 60),
                 }
               ]
             }
@@ -1363,8 +1363,30 @@ Best regards,
     }
   }
 
-  // Send payment received notification via WhatsApp Web
-  private async sendPaymentReceivedNotificationViaWhatsAppWeb(sessionId: string, props: PaymentReceivedNotificationDto): Promise<any> {
+  async send_payment_received_notification(props: PaymentReceivedNotificationDto) {
+    try {
+      // Create the body using the WhatsappBodyDto class with domain parameter
+      const whatsappBody = new WhatsappBodyDto(
+        'payment_received_notification',
+        props.receiver_mobile_number,
+        props.library_url
+      )
+        .addBodyComponent([
+          { type: 'text', text: props.member_name },
+          { type: 'text', text: props.desk_title },
+          { type: 'text', text: props.room_title }
+        ]);
+
+      // Use the new sendMessage method which now has domain built-in
+      return await whatsappBody.sendMessage();
+    } catch (error) {
+      console.error(error);
+      this.handleAxiosError(error);
+    }
+  }
+
+  // Send payment request rejected notification via WhatsApp Web
+  private async sendPaymentRequestRejectedViaWhatsAppWeb(sessionId: string, props: PaymentRequestRejectedDto): Promise<any> {
     try {
       if (!this.webjsService) {
         throw new Error('WhatsApp Web service not available');
@@ -1378,26 +1400,19 @@ Best regards,
         phoneNumber = `91${phoneNumber}`;
       }
 
-      // Get library name from library URL (we'll need to fetch this from database)
-      const library = await this.databaseService.library.findUnique({
-        where: { library_url: props.library_url }
-      });
-
-      const libraryName = library?.name || 'Library';
-
-      // Create payment received notification message using the new template
+      // Create payment request rejected notification message using the new template
       const messageContent = `Hello *${props.member_name}*,
 Your recent library plan continuation request has been rejected.
 
 📌 Please check the details and take necessary action here:
-👉 https://${props.library_url}/profile/plan_continuation
+👉 https://${props.library_url}.abhyasika.online/profile/plan_continuation
 
 If you believe this is a mistake or need help, kindly contact.
 
 Thank you!
-*${libraryName}*`;
+*${props.library_name}*`;
 
-      console.log(`📝 Payment received notification message content prepared:`, messageContent);
+      console.log(`📝 Payment request rejected notification message content prepared:`, messageContent);
 
       // Send via WhatsApp Web
       const result = await this.webjsService.sendMessage({
@@ -1408,7 +1423,7 @@ Thank you!
 
       // Check if the result indicates success
       if (result && result.success) {
-        console.log(`✅ Payment received notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
+        console.log(`✅ Payment request rejected notification sent via WhatsApp Web to ${phoneNumber}, message ID: ${result.message_id}`);
         return result;
       } else {
         const errorMsg = result?.error || 'Unknown error occurred';
@@ -1416,15 +1431,15 @@ Thank you!
         throw new Error(`WhatsApp Web sending failed: ${errorMsg}`);
       }
     } catch (error) {
-      console.error(`❌ Failed to send payment received notification via WhatsApp Web:`, error);
+      console.error(`❌ Failed to send payment request rejected notification via WhatsApp Web:`, error);
       throw error;
     }
   }
 
-  async send_payment_received_notification(props: PaymentReceivedNotificationDto) {
+  async send_payment_request_rejected(props: PaymentRequestRejectedDto) {
     // Validate required fields
     if (!props.receiver_mobile_number || props.receiver_mobile_number === 'null' || props.receiver_mobile_number.trim() === '') {
-      console.error('Invalid receiver mobile number provided for payment received notification')
+      console.error('Invalid receiver mobile number provided for payment request rejected notification')
       return {
         data: 'Invalid receiver mobile number',
         success: false
@@ -1437,12 +1452,12 @@ Thank you!
       const whatsappWebSession = await this.checkForWhatsAppWebSession(props.library_url);
 
       if (whatsappWebSession) {
-        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending payment received notification via WhatsApp Web...`);
+        console.log(`📱 Found active WhatsApp Web session for library ${props.library_url}, sending payment request rejected notification via WhatsApp Web...`);
         console.log(`🔧 WebJS Service available: ${!!this.webjsService}`);
 
         try {
-          const result = await this.sendPaymentReceivedNotificationViaWhatsAppWeb(whatsappWebSession.session_id, props);
-          console.log(`✅ WhatsApp Web payment received notification completed successfully`);
+          const result = await this.sendPaymentRequestRejectedViaWhatsAppWeb(whatsappWebSession.session_id, props);
+          console.log(`✅ WhatsApp Web payment request rejected notification completed successfully`);
 
           // Create billing record for WhatsApp Web usage
           await this.billing_service.create_whatsapp_billing({
@@ -1459,30 +1474,8 @@ Thank you!
       }
 
       // Step 2: Fallback to API if no WhatsApp Web session or if WhatsApp Web failed
-      console.log(`📞 Sending payment received notification via API method...`);
+      console.log(`📞 Sending payment request rejected notification via API method...`);
 
-      // Create the body using the WhatsappBodyDto class with domain parameter
-      const whatsappBody = new WhatsappBodyDto(
-        'payment_received_notification',
-        props.receiver_mobile_number,
-        props.library_url
-      )
-        .addBodyComponent([
-          { type: 'text', text: props.member_name },
-          { type: 'text', text: props.desk_title },
-          { type: 'text', text: props.room_title }
-        ]);
-
-      // Use the new sendMessage method which now has domain built-in
-      return await whatsappBody.sendMessage();
-    } catch (error) {
-      console.error('Error sending payment received notification:', error);
-      this.handleAxiosError(error);
-    }
-  }
-
-  async send_payment_request_rejected(props: PaymentRequestRejectedDto) {
-    try {
       const whatsappBody = new WhatsappBodyDto(
         'payment_request_rejected',
         props.receiver_mobile_number,
@@ -1497,7 +1490,7 @@ Thank you!
 
       return await whatsappBody.sendMessage();
     } catch (error) {
-      console.error(error);
+      console.error('Error sending payment request rejected notification:', error);
       this.handleAxiosError(error);
     }
   }
