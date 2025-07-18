@@ -129,7 +129,7 @@ export class WhatsappBodyDto {
     async sendMessage(billingService?: BillingService): Promise<any> {
         try {
             const response = await axios.post(
-                'https://graph.facebook.com/v20.0/431174140080894/messages',
+                'https://graph.facebook.com/v20.0/758580787332982/messages',
                 this.build(),
                 {
                     headers: {
