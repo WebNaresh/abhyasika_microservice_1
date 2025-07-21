@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import axios from 'axios';
 import { FirstReminderPlanRenewalPendingV1Dto } from 'src/utils/whatsapp/dto/first_reminder__plan_renewal_pending_v1.dto';
 import { MessageService } from '../messages/message.service';
 import { DatabaseService } from '../utils/database/database.service';
@@ -511,6 +512,67 @@ export class CronService {
             this.logger.log(`Found ${expiredPlans.length} expired plans with is_completed set to false`);
         } catch (error) {
             this.logger.error('Error checking expired plans:', error);
+        }
+    }
+
+    @Cron('0 0 10 1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31 * *', {
+        timeZone: 'Asia/Kolkata',
+        disabled: false,
+    })
+    async sendNotificationReports() {
+        this.logger.log('Running notification reports cron job - every 2 days');
+
+        try {
+            // Query all active libraries from the database
+            const libraries = await this.prisma.library.findMany({
+                where: {
+                    isActive: true
+                },
+                select: {
+                    id: true,
+                    name: true
+                }
+            });
+
+            if (libraries.length === 0) {
+                this.logger.log('No active libraries found for notification reports');
+                return;
+            }
+
+            // Extract library IDs as string array
+            const libraryIdsArray = libraries.map(library => library.id);
+
+            this.logger.log(`Sending notification reports for ${libraries.length} active libraries`);
+            this.logger.log(`Library IDs: ${libraryIdsArray.join(', ')}`);
+
+            // Make POST request to notification report endpoint
+            const response = await axios.post(
+                `${process.env.BACKEND_URL}/admin/whatsapp/notification_report`,
+                {
+                    ids: libraryIdsArray, // Array of library ID strings
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000 // 30 second timeout
+                }
+            );
+
+            this.logger.log(`✅ Notification reports sent successfully. Response status: ${response.status}`);
+            this.logger.log(`Response data: ${JSON.stringify(response.data)}`);
+
+        } catch (error) {
+            this.logger.error('❌ Error sending notification reports:', error);
+
+            if (axios.isAxiosError(error)) {
+                this.logger.error(`Axios error details:`, {
+                    status: error.response?.status,
+                    statusText: error.response?.statusText,
+                    data: error.response?.data,
+                    message: error.message
+                });
+            }
         }
     }
 
